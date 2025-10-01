@@ -1,3 +1,5 @@
+#pragma once
+
 /**
  * this interface represents something that follows arduino's typical lifecycle such as sensors, IO pins, etc.
  * 
