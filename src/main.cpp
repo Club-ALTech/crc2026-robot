@@ -2,6 +2,8 @@
 #include <CrcLib.h>
 
 const int motor_speed_controller_pin = 6;
+const bool CLOCKWISE = true, COUNTER_CLOCKWISE = false;
+const char MAX_CLOCKWISE = 127, MAX_COUNTER_CLOCKWISE = -128;
 
 void setup()
 {
@@ -13,11 +15,29 @@ void setup()
 void loop()
 {
   CrcLib::Update();
-  static unsigned char pwm_output = 0;
+  static char pwm_output = 0;
+  static bool direction = CLOCKWISE;
 
-  if (millis() % 100 == 0) {
+  if (millis() % 100 == 0)
+  {
     CrcLib::SetPwmOutput(motor_speed_controller_pin, pwm_output);
 
-    pwm_output += 1; // overflows, we dont mind.
+    if (direction == CLOCKWISE)
+    {
+      pwm_output += 1;
+    }
+    else if (direction == COUNTER_CLOCKWISE)
+    {
+      pwm_output -= 1;
+    }
+
+    if (pwm_output == MAX_CLOCKWISE)
+    {
+      direction = COUNTER_CLOCKWISE;
+    }
+    else if (pwm_output == MAX_COUNTER_CLOCKWISE)
+    {
+      direction = MAX_COUNTER_CLOCKWISE;
+    }
   }
 }
