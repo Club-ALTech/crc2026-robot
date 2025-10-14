@@ -37,7 +37,7 @@ void loop()
     }
     else if (pwm_output == MAX_COUNTER_CLOCKWISE)
     {
-      direction = MAX_COUNTER_CLOCKWISE;
+      direction = CLOCKWISE;
     }
   }
 }
