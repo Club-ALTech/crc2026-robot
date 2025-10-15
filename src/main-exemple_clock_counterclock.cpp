@@ -21,7 +21,7 @@ void loop()
   if (millis() % 100 == 0)
   {
     CrcLib::SetPwmOutput(motor_speed_controller_pin, pwm_output);
-
+    
     if (direction == CLOCKWISE)
     {
       pwm_output += 1;
