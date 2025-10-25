@@ -11,9 +11,9 @@ const int pin_BL = CRC_PWM_1;
 const int pin_BR = CRC_PWM_11;
 
 // Robot physical parameters (in meters)
-const float WHEEL_RADIUS = 0.0508;  // 2 inches = 0.0508 meters
-const float L = 0.2286;  // Length between wheel centers (9 inches = 0.2286 meters)
-const float W = 0.2286;  // Width between wheel centers (9 inches = 0.2286 meters)
+const float WHEEL_RADIUS = 0.086;  // 2 inches = 0.0508 meters
+const float L = 0.625;  // Length between wheel centers (9 inches = 0.2286 meters)
+const float W = 0.280;  // Width between wheel centers (9 inches = 0.2286 meters)
 
 // Maximum speeds
 const float MAX_LINEAR_SPEED = 1.0;  // meters per second
