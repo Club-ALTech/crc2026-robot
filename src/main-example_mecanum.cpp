@@ -70,39 +70,15 @@ void loop()
     int8_t joy_stick_state_right_X = clean_joystick_input(RAC(ANALOG::JOYSTICK2_X));
     // int8_t joy_stick_state_right_Y = clean_joystick_input(RAC(ANALOG::JOYSTICK2_Y));
 
-    if (millis() % 1 == 0)
+    if (micros() % 1 == 0)
     {
-      // Serial.println("=================================");
-      // Serial.print("pin_BL_LY" + String((int8_t)joy_stick_state_left_Y) + "\t");
-      // Serial.print("pin_BR_LY" + String((int8_t)-joy_stick_state_left_Y) + "\t");
-      // Serial.print("pin_FL_LY" + String((int8_t)joy_stick_state_left_Y) + "\t");
-      // Serial.println("pin_FR_LY" + String((int8_t)-joy_stick_state_left_Y));
-      // Serial.println("================");
-      // Serial.print("pin_BL_LX" + String((int8_t)joy_stick_state_left_X) + "\t");
-      // Serial.print("pin_BR_LX" + String((int8_t)-joy_stick_state_left_X) + "\t");
-      // Serial.print("pin_FL_LX" + String((int8_t)joy_stick_state_left_X) + "\t");
-      // Serial.println("pin_FR_LX" + String((int8_t)-joy_stick_state_left_X));
-      // Serial.println("=================================");
-
       MoveHolonomic(-joy_stick_state_left_Y, joy_stick_state_right_X, joy_stick_state_left_X, pin_FL, pin_BL, pin_FR, pin_BR);
-
-      // // Movement vers l'avant/arriere
-      // CrcLib::SetPwmOutput(pin_BL, joy_stick_state_left_Y);
-      // CrcLib::SetPwmOutput(pin_BR, -joy_stick_state_left_Y);
-      // CrcLib::SetPwmOutput(pin_FL, joy_stick_state_left_Y);
-      // CrcLib::SetPwmOutput(pin_FR, -joy_stick_state_left_Y);
-      // // Movement sur les cotes(droite/gauche)
-      // CrcLib::SetPwmOutput(pin_BL, joy_stick_state_left_X);
-      // CrcLib::SetPwmOutput(pin_BR, joy_stick_state_left_X);
-      // CrcLib::SetPwmOutput(pin_FL, -joy_stick_state_left_X);
-      // CrcLib::SetPwmOutput(pin_FR, -joy_stick_state_left_X);
-      // Serial.println("=================================");
 
       Serial.print("LX" + String(joy_stick_state_left_X)+ "\t");
       Serial.print("LY" + String(joy_stick_state_left_Y)+ "\t");
       Serial.print("RX" + String (joy_stick_state_right_X)+ "\t");
       // Serial.println("YD" + String(joy_stick_state_right_Y));
-      Serial.println("================");
+      Serial.println("=================================");
     }
   }
 
