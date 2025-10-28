@@ -4,10 +4,10 @@
 const bool CLOCKWISE = true, COUNTER_CLOCKWISE = false;
 const char MAX_CLOCKWISE = 127, MAX_COUNTER_CLOCKWISE = -128;
 
-const int pin_FL = CRC_PWM_3;
-const int pin_FR = CRC_PWM_10;
+const int pin_FL = CRC_PWM_2;
+const int pin_FR = CRC_PWM_3;
 const int pin_BL = CRC_PWM_1;
-const int pin_BR = CRC_PWM_11;
+const int pin_BR = CRC_PWM_4;
 
 void setup()
 {
@@ -23,7 +23,7 @@ int8_t clean_joystick_input(int8_t input) {
   if (abs(input) < 15) {
     return 0;
   }
-  auto constrainted = constrain(input, -127, 127); 
+  auto constrainted = constrain(input, -127, 128); 
   return constrainted;
 }
 
@@ -68,24 +68,26 @@ void loop()
     int8_t joy_stick_state_left_X = clean_joystick_input(RAC(ANALOG::JOYSTICK1_X));
     int8_t joy_stick_state_left_Y = clean_joystick_input(RAC(ANALOG::JOYSTICK1_Y));
     int8_t joy_stick_state_right_X = clean_joystick_input(RAC(ANALOG::JOYSTICK2_X));
-    // int8_t joy_stick_state_right_Y = clean_joystick_input(RAC(ANALOG::JOYSTICK2_Y));
+    int8_t joy_stick_state_right_Y = clean_joystick_input(RAC(ANALOG::JOYSTICK2_Y));
 
-    if (micros() % 1 == 0)
+
+    if (millis() % 100 == 0)
     {
       MoveHolonomic(-joy_stick_state_left_Y, joy_stick_state_right_X, joy_stick_state_left_X, pin_FL, pin_BL, pin_FR, pin_BR);
+      // CrcLib::MoveHolonomic(joy_stick_state_left_Y, joy_stick_state_right_X, joy_stick_state_left_X, pin_FL, pin_BL, pin_FR, pin_BR);
 
       Serial.print("LX" + String(joy_stick_state_left_X)+ "\t");
       Serial.print("LY" + String(joy_stick_state_left_Y)+ "\t");
       Serial.print("RX" + String (joy_stick_state_right_X)+ "\t");
-      // Serial.println("YD" + String(joy_stick_state_right_Y));
+      Serial.println("YD" + String(joy_stick_state_right_Y));
       Serial.println("=================================");
     }
   }
 
-  else {
-    CrcLib::SetPwmOutput(pin_BL, 0);
-    CrcLib::SetPwmOutput(pin_BR, 0);
-    CrcLib::SetPwmOutput(pin_FL, 0);
-    CrcLib::SetPwmOutput(pin_FR, 0);
-  }
+  // else {
+  //   CrcLib::SetPwmOutput(pin_BL, 0);
+  //   CrcLib::SetPwmOutput(pin_BR, 0);
+  //   CrcLib::SetPwmOutput(pin_FL, 0);
+  //   CrcLib::SetPwmOutput(pin_FR, 0);
+  // }
 }
