@@ -12,7 +12,7 @@ byte data[512];
 void setup()
 {
   Serial.begin(115200);
-  CrcLib::Initialize();
+  // CrcLib::Initialize();
   Wire.begin(); // join i2c bus (address optional for master)
 
   for (size_t i = 0; i < sizeof(data); i++)
@@ -25,7 +25,7 @@ int register_address = NAVX_REG_YAW_L;
 
 void loop()
 {
-  CrcLib::Update();
+  // CrcLib::Update();
   /* Transmit I2C data request */
   Wire.beginTransmission(NAVX_SENSOR_DEVICE_I2C_ADDRESS_7BIT); // Begin transmitting to navX-Sensor
   Wire.write(register_address);                                // Sends starting register address
@@ -35,7 +35,6 @@ void loop()
   /* Receive the echoed value back */
   Wire.beginTransmission(NAVX_SENSOR_DEVICE_I2C_ADDRESS_7BIT);              // Begin transmitting to navX-Sensor
   Wire.requestFrom(NAVX_SENSOR_DEVICE_I2C_ADDRESS_7BIT, NUM_BYTES_TO_READ); // Send number of bytes to read
-  delay(1);
   for (size_t i = 0; Wire.available(); i++)
   { // Read data (slave may send less than requested)
     data[i++] = Wire.read();
@@ -59,5 +58,5 @@ void loop()
   Serial.print(heading, 2);
   Serial.println("");
 
-  delay(ITERATION_DELAY_MS);
+  // delay(ITERATION_DELAY_MS);
 }

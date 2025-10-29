@@ -59,7 +59,7 @@ void loop()
 {
   CrcLib::Update();
 
-  if(millis() % 100 != 0){ 
+  if(millis() % 1 != 0){ 
     return;
   }
 
@@ -71,7 +71,7 @@ void loop()
     int8_t joy_stick_state_right_Y = clean_joystick_input(RAC(ANALOG::JOYSTICK2_Y));
 
 
-    if (millis() % 100 == 0)
+    // if (millis() % 100 == 0)
     {
       MoveHolonomic(-joy_stick_state_left_Y, joy_stick_state_right_X, joy_stick_state_left_X, pin_FL, pin_BL, pin_FR, pin_BR);
       // CrcLib::MoveHolonomic(joy_stick_state_left_Y, joy_stick_state_right_X, joy_stick_state_left_X, pin_FL, pin_BL, pin_FR, pin_BR);
