@@ -36,7 +36,16 @@ void setup()
   }
 }
 
-float gyro_thingy()
+struct Heading
+{
+  float yaw;
+  float pitch;
+  float roll;
+  float heading;
+};
+
+
+Heading gyro_thingy()
 {
   // CrcLib::Update();
   /* Transmit I2C data request */
@@ -60,20 +69,24 @@ float gyro_thingy()
   float roll = IMURegisters::decodeProtocolSignedHundredthsFloat((char *)&data[4]) / 2.55;      // The cast is needed on arduino
   float heading = IMURegisters::decodeProtocolUnsignedHundredthsFloat((char *)&data[6]) / 2.55; // The cast is needed on arduino
 
+  Heading h;
+  h.yaw = yaw * 100;
+  h.pitch = pitch * 100;
+  h.roll = roll * 100;
+  h.heading = heading * 100;
+
   /* Display orientation values */
-  Serial.print("yaw:  ");
-  Serial.print(yaw, 2);
+  Serial.print("yaw: ");
+  Serial.print(h.yaw);
   Serial.print("  pitch:  ");
-  Serial.print(pitch, 2);
+  Serial.print(h.pitch);
   Serial.print("  roll:  ");
-  Serial.print(roll, 2);
+  Serial.print(h.roll);
   Serial.print("  heading:  ");
-  Serial.print(heading, 2);
+  Serial.print(h.heading);
   Serial.println("");
 
-  return yaw, pitch, roll, heading;
-
-  // delay(ITERATION_DELAY_MS);
+  return h;
 }
 
 int8_t clean_joystick_input(int8_t input) {
@@ -100,26 +113,30 @@ void loop()
     return;
   }
 
-  // Serial.println("Battery voltage: " + String(CrcLib::GetBatteryVoltage()));
+  if (CrcLib::GetBatteryVoltage() < 12) {
+      Serial.println("Battery voltage: " + String(CrcLib::GetBatteryVoltage()));
+      CrcLib::SetPwmOutput(pin_BL, 0);
+      CrcLib::SetPwmOutput(pin_BR, 0);
+      CrcLib::SetPwmOutput(pin_FL, 0);
+      CrcLib::SetPwmOutput(pin_FR, 0);
+      return;
+  }
+
+  Heading h = gyro_thingy();
 
   if (CrcLib::IsCommValid()) {   
     #define RAC(channel) CrcLib::ReadAnalogChannel(channel)
     int8_t joy_stick_state_left_X = clean_joystick_input(RAC(ANALOG::JOYSTICK1_X));
     int8_t joy_stick_state_left_Y = clean_joystick_input(RAC(ANALOG::JOYSTICK1_Y));
     int8_t joy_stick_state_right_X = clean_joystick_input(RAC(ANALOG::JOYSTICK2_X));
-    int8_t joy_stick_state_right_Y = clean_joystick_input(RAC(ANALOG::JOYSTICK2_Y));
+    // int8_t joy_stick_state_right_Y = clean_joystick_input(RAC(ANALOG::JOYSTICK2_Y));
 
-
-    // MoveHolonomic(-joy_stick_state_left_Y, joy_stick_state_right_X, joy_stick_state_left_X, pin_FL, pin_BL, pin_FR, pin_BR);
     CrcLib::MoveHolonomic(joy_stick_state_left_Y, -joy_stick_state_right_X, -joy_stick_state_left_X, pin_FL, pin_BL, pin_FR, pin_BR);
 
-    Serial.print("LX" + String(joy_stick_state_left_X)+ "\t");
-    Serial.print("LY" + String(joy_stick_state_left_Y)+ "\t");
-    Serial.print("RX" + String (joy_stick_state_right_X)+ "\t");
-    Serial.println("YD" + String(joy_stick_state_right_Y));
-    Serial.println("=================================");
+    // Serial.print("LX" + String(joy_stick_state_left_X)+ "\t");
+    // Serial.print("LY" + String(joy_stick_state_left_Y)+ "\t");
+    // Serial.print("RX" + String (joy_stick_state_right_X)+ "\t");
+    // Serial.println("YD" + String(joy_stick_state_right_Y));
+    // Serial.println("=================================");
   }
-
-  // gyro_thingy();
-
 }
