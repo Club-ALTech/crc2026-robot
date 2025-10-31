@@ -23,7 +23,16 @@ void setup()
 
 int register_address = NAVX_REG_YAW_L;
 
-void loop()
+struct Heading
+{
+  float yaw;
+  float pitch;
+  float roll;
+  float heading;
+};
+
+
+Heading gyro_thingy()
 {
   // CrcLib::Update();
   /* Transmit I2C data request */
@@ -42,21 +51,33 @@ void loop()
   Wire.endTransmission(); // Stop transmitting
 
   /* Decode received data to floating-point orientation values */
-  float yaw = IMURegisters::decodeProtocolSignedHundredthsFloat((char *)&data[0]);       // The cast is needed on arduino
-  float pitch = IMURegisters::decodeProtocolSignedHundredthsFloat((char *)&data[2]);     // The cast is needed on arduino
-  float roll = IMURegisters::decodeProtocolSignedHundredthsFloat((char *)&data[4]);      // The cast is needed on arduino
-  float heading = IMURegisters::decodeProtocolUnsignedHundredthsFloat((char *)&data[6]); // The cast is needed on arduino
+  float pitch = IMURegisters::decodeProtocolSignedHundredthsFloat((char *)&data[0]) / 2.55;       // The cast is needed on arduino
+  float yaw = IMURegisters::decodeProtocolSignedHundredthsFloat((char *)&data[2]) / 2.55;     // The cast is needed on arduino
+  float roll = IMURegisters::decodeProtocolSignedHundredthsFloat((char *)&data[4]) / 2.55;      // The cast is needed on arduino
+  float heading = IMURegisters::decodeProtocolUnsignedHundredthsFloat((char *)&data[6]) / 2.55; // The cast is needed on arduino
+
+  Heading h;
+  h.yaw = yaw * 100;
+  h.pitch = pitch * 100;
+  h.roll = roll * 100;
+  h.heading = heading * 100;
 
   /* Display orientation values */
-  Serial.print("yaw:  ");
-  Serial.print(yaw, 2);
+  Serial.print("yaw: ");
+  Serial.print(h.yaw);
   Serial.print("  pitch:  ");
-  Serial.print(pitch, 2);
+  Serial.print(h.pitch);
   Serial.print("  roll:  ");
-  Serial.print(roll, 2);
+  Serial.print(h.roll);
   Serial.print("  heading:  ");
-  Serial.print(heading, 2);
+  Serial.print(h.heading);
   Serial.println("");
 
-  // delay(ITERATION_DELAY_MS);
+  return h;
+}
+
+void loop()
+{
+  CrcLib::Update();
+  gyro_thingy();
 }
