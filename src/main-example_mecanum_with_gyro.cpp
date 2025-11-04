@@ -25,9 +25,9 @@ void setup()
 {
   CrcLib::Initialize();
   CrcLib::InitializePwmOutput(pin_BL, false);
-  CrcLib::InitializePwmOutput(pin_BR, false); // Is normally true
+  CrcLib::InitializePwmOutput(pin_BR, true); // Is normally true
   CrcLib::InitializePwmOutput(pin_FL, false);
-  CrcLib::InitializePwmOutput(pin_FR, false); // Is normally true
+  CrcLib::InitializePwmOutput(pin_FR, true); // Is normally true
   Serial.begin(115200);
   // CrcLib::Initialize();
   Wire.begin(); // join i2c bus (address optional for master)
@@ -51,26 +51,6 @@ struct FieldCentricInput {
     double strafe;
     double rotation;
 };
-
-void MoveHolonomic(
-    int8_t forwardChannel,
-    int8_t yawChannel,
-    int8_t strafeChannel,
-    unsigned char frontLeftMotor,
-    unsigned char backLeftMotor,
-    unsigned char frontRightMotor,
-    unsigned char backRightMotor)
-{
-    int8_t frontRight = constrain(yawChannel + forwardChannel + strafeChannel, -128, 127); // Determines the power of the front left wheel
-    int8_t frontLeft  = constrain(yawChannel - forwardChannel + strafeChannel, -128, 127); // Determines the power of the front left wheel
-    int8_t backRight  = constrain(yawChannel + forwardChannel - strafeChannel, -128, 127); // Determines the power of the right wheels
-    int8_t backLeft   = constrain(yawChannel - forwardChannel - strafeChannel, -128, 127); // Determines the power of the front left wheel
-
-    CrcLib::SetPwmOutput(frontLeftMotor, frontLeft);
-    CrcLib::SetPwmOutput(backLeftMotor, backLeft);
-    CrcLib::SetPwmOutput(frontRightMotor, frontRight);
-    CrcLib::SetPwmOutput(backRightMotor, backRight);
-}
 
 // Convert field-centric inputs to robot-centric
 FieldCentricInput convertToRobotCentric(double forward, double strafe, double rotation, double gyroAngle) {
@@ -173,21 +153,15 @@ void loop()
 
     // Convert joystick inputs to field-centric
     FieldCentricInput robotCentric = convertToRobotCentric(
-        -joy_stick_state_left_Y, // Forward
-        joy_stick_state_left_X,  // Strafe
-        joy_stick_state_right_X, // Rotation
+        joy_stick_state_left_Y, // Forward
+        -joy_stick_state_left_X,  // Strafe
+        -joy_stick_state_right_X, // Rotation
         h.yaw * 2
         // Current robot heading
     );
 
     // Apply converted values to motors
-    // CrcLib::MoveHolonomic(
-    //     robotCentric.forward, 
-    //     robotCentric.rotation, 
-    //     robotCentric.strafe, 
-    //     pin_FL, pin_BL, pin_FR, pin_BR
-    // );
-    MoveHolonomic(
+    CrcLib::MoveHolonomic(
         robotCentric.forward, 
         robotCentric.rotation, 
         robotCentric.strafe, 
