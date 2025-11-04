@@ -20,7 +20,7 @@ void setup()
 }
 
 int8_t clean_joystick_input(int8_t input) {
-  if (abs(input) < 15) {
+  if (abs(input) < 5) {
     return 0;
   }
   auto constrainted = constrain(input, -127, 128); 

@@ -1,7 +1,8 @@
 #include <Arduino.h>
 #include <CrcLib.h>
 #include <Wire.h>
-#include "AHRSProtocol.h" // navX-Sensor Register Definition header file
+#include "AHRSProtocol.h"
+#include <math.h>
 
 const bool CLOCKWISE = true, COUNTER_CLOCKWISE = false;
 const char MAX_CLOCKWISE = 127, MAX_COUNTER_CLOCKWISE = -128;
@@ -18,14 +19,15 @@ byte data[512];
 #define NUM_BYTES_TO_READ 8
 
 int register_address = NAVX_REG_YAW_L;
+float battery_voltage_limit = 11.5f;
 
 void setup()
 {
   CrcLib::Initialize();
   CrcLib::InitializePwmOutput(pin_BL, false);
-  CrcLib::InitializePwmOutput(pin_BR, true);
+  CrcLib::InitializePwmOutput(pin_BR, false); // Is normally true
   CrcLib::InitializePwmOutput(pin_FL, false);
-  CrcLib::InitializePwmOutput(pin_FR, true);
+  CrcLib::InitializePwmOutput(pin_FR, false); // Is normally true
   Serial.begin(115200);
   // CrcLib::Initialize();
   Wire.begin(); // join i2c bus (address optional for master)
@@ -44,6 +46,46 @@ struct Heading
   float heading;
 };
 
+struct FieldCentricInput {
+    double forward;
+    double strafe;
+    double rotation;
+};
+
+void MoveHolonomic(
+    int8_t forwardChannel,
+    int8_t yawChannel,
+    int8_t strafeChannel,
+    unsigned char frontLeftMotor,
+    unsigned char backLeftMotor,
+    unsigned char frontRightMotor,
+    unsigned char backRightMotor)
+{
+    int8_t frontRight = constrain(yawChannel + forwardChannel + strafeChannel, -128, 127); // Determines the power of the front left wheel
+    int8_t frontLeft  = constrain(yawChannel - forwardChannel + strafeChannel, -128, 127); // Determines the power of the front left wheel
+    int8_t backRight  = constrain(yawChannel + forwardChannel - strafeChannel, -128, 127); // Determines the power of the right wheels
+    int8_t backLeft   = constrain(yawChannel - forwardChannel - strafeChannel, -128, 127); // Determines the power of the front left wheel
+
+    CrcLib::SetPwmOutput(frontLeftMotor, frontLeft);
+    CrcLib::SetPwmOutput(backLeftMotor, backLeft);
+    CrcLib::SetPwmOutput(frontRightMotor, frontRight);
+    CrcLib::SetPwmOutput(backRightMotor, backRight);
+}
+
+// Convert field-centric inputs to robot-centric
+FieldCentricInput convertToRobotCentric(double forward, double strafe, double rotation, double gyroAngle) {
+    // Convert gyro angle to radians
+    double angleRad = (gyroAngle * PI) / 180.0;
+    
+    FieldCentricInput result;
+    // Perform field-centric to robot-centric conversion
+    result.forward = forward * cos(angleRad) + strafe * sin(angleRad);
+    result.strafe = -forward * sin(angleRad) + strafe * cos(angleRad);
+    result.rotation = rotation;
+    Serial.print("forward: " + String(forward) + " strafe: " + String(strafe) + " rotation: " + String(rotation));
+    Serial.println(" forward: " + String(result.forward) + " strafe: " + String(result.strafe) + " rotation: " + String(result.rotation));
+    return result;
+}
 
 Heading gyro_thingy()
 {
@@ -69,32 +111,27 @@ Heading gyro_thingy()
   float roll = IMURegisters::decodeProtocolSignedHundredthsFloat((char *)&data[4]) / 2.55;      // The cast is needed on arduino
   float heading = IMURegisters::decodeProtocolUnsignedHundredthsFloat((char *)&data[6]) / 2.55; // The cast is needed on arduino
 
-  Heading h;
-  h.yaw = yaw * 100;
-  h.pitch = pitch * 100;
-  h.roll = roll * 100;
-  h.heading = heading * 100;
-
-  /* Display orientation values */
-  Serial.print("yaw: ");
-  Serial.print(h.yaw);
-  Serial.print("  pitch:  ");
-  Serial.print(h.pitch);
-  Serial.print("  roll:  ");
-  Serial.print(h.roll);
-  Serial.print("  heading:  ");
-  Serial.print(h.heading);
-  Serial.println("");
+  auto h = (Heading){.yaw = yaw * 360, .pitch = pitch * 360, .roll = roll * 360, .heading = heading * 360};
+  // /* Display orientation values */
+  // Serial.print("yaw: ");
+  // Serial.print(h.yaw);
+  // Serial.print("  pitch:  ");
+  // Serial.print(h.pitch);
+  // Serial.print("  roll:  ");
+  // Serial.print(h.roll);
+  // Serial.print("  heading:  ");
+  // Serial.print(h.heading);
+  // Serial.println("");
 
   return h;
 }
 
 int8_t clean_joystick_input(int8_t input) {
-  if (abs(input) < 0) {
+  if (abs(input) < 10) {  // Add deadzone to prevent drift
     return 0;
   }
-  auto constrainted = constrain(input, -127,128); 
-  return constrainted;
+  auto constrained = constrain(input, -120, 120);  // Fix max value to be symmetric
+  return constrained;
 }
 
   //   ^
@@ -113,30 +150,48 @@ void loop()
     return;
   }
 
-  if (CrcLib::GetBatteryVoltage() < 12) {
-      Serial.println("Battery voltage: " + String(CrcLib::GetBatteryVoltage()));
-      CrcLib::SetPwmOutput(pin_BL, 0);
-      CrcLib::SetPwmOutput(pin_BR, 0);
-      CrcLib::SetPwmOutput(pin_FL, 0);
-      CrcLib::SetPwmOutput(pin_FR, 0);
-      return;
-  }
+  // Serial.println("Battery voltage: " + String(CrcLib::GetBatteryVoltage()));
+  // if (CrcLib::GetBatteryVoltage() < battery_voltage_limit) {
+  //   battery_voltage_limit = 15.0f;
+  //   Serial.println("Battery voltage: " + String(CrcLib::GetBatteryVoltage()));
+  //   CrcLib::SetPwmOutput(pin_BL, 0);
+  //   CrcLib::SetPwmOutput(pin_BR, 0);
+  //   CrcLib::SetPwmOutput(pin_FL, 0);
+  //   CrcLib::SetPwmOutput(pin_FR, 0);
+  //   return;
+  // }
 
-  Heading h = gyro_thingy();
-
-  if (CrcLib::IsCommValid()) {   
-    #define RAC(channel) CrcLib::ReadAnalogChannel(channel)
+  if (CrcLib::IsCommValid())
+  {
+#define RAC(channel) CrcLib::ReadAnalogChannel(channel)
     int8_t joy_stick_state_left_X = clean_joystick_input(RAC(ANALOG::JOYSTICK1_X));
     int8_t joy_stick_state_left_Y = clean_joystick_input(RAC(ANALOG::JOYSTICK1_Y));
     int8_t joy_stick_state_right_X = clean_joystick_input(RAC(ANALOG::JOYSTICK2_X));
-    // int8_t joy_stick_state_right_Y = clean_joystick_input(RAC(ANALOG::JOYSTICK2_Y));
 
-    CrcLib::MoveHolonomic(joy_stick_state_left_Y, -joy_stick_state_right_X, -joy_stick_state_left_X, pin_FL, pin_BL, pin_FR, pin_BR);
+    // Get current heading from gyro
+    Heading h = gyro_thingy();
 
-    // Serial.print("LX" + String(joy_stick_state_left_X)+ "\t");
-    // Serial.print("LY" + String(joy_stick_state_left_Y)+ "\t");
-    // Serial.print("RX" + String (joy_stick_state_right_X)+ "\t");
-    // Serial.println("YD" + String(joy_stick_state_right_Y));
-    // Serial.println("=================================");
+    // Convert joystick inputs to field-centric
+    FieldCentricInput robotCentric = convertToRobotCentric(
+        -joy_stick_state_left_Y, // Forward
+        joy_stick_state_left_X,  // Strafe
+        joy_stick_state_right_X, // Rotation
+        h.yaw * 2
+        // Current robot heading
+    );
+
+    // Apply converted values to motors
+    // CrcLib::MoveHolonomic(
+    //     robotCentric.forward, 
+    //     robotCentric.rotation, 
+    //     robotCentric.strafe, 
+    //     pin_FL, pin_BL, pin_FR, pin_BR
+    // );
+    MoveHolonomic(
+        robotCentric.forward, 
+        robotCentric.rotation, 
+        robotCentric.strafe, 
+        pin_FL, pin_BL, pin_FR, pin_BR
+    );
   }
 }
