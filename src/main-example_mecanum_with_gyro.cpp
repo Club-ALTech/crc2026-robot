@@ -1,7 +1,7 @@
+#include "AHRSProtocol.h"
 #include <Arduino.h>
 #include <CrcLib.h>
 #include <Wire.h>
-#include "AHRSProtocol.h"
 #include <math.h>
 
 const bool CLOCKWISE = true, COUNTER_CLOCKWISE = false;
@@ -24,18 +24,15 @@ float battery_voltage_limit = 11.5f;
 void setup()
 {
   CrcLib::Initialize();
+
   CrcLib::InitializePwmOutput(pin_BL, false);
   CrcLib::InitializePwmOutput(pin_BR, true); // Is normally true
   CrcLib::InitializePwmOutput(pin_FL, false);
   CrcLib::InitializePwmOutput(pin_FR, true); // Is normally true
   Serial.begin(115200);
-  // CrcLib::Initialize();
   Wire.begin(); // join i2c bus (address optional for master)
 
-  for (size_t i = 0; i < sizeof(data); i++)
-  {
-    data[i] = 0;
-  }
+  memset(data, 0, sizeof(data));
 }
 
 struct Heading
@@ -46,25 +43,28 @@ struct Heading
   float heading;
 };
 
-struct FieldCentricInput {
-    double forward;
-    double strafe;
-    double rotation;
+struct FieldCentricInput
+{
+  int8_t forward;
+  int8_t strafe;
+  double rotation;
 };
 
 // Convert field-centric inputs to robot-centric
-FieldCentricInput convertToRobotCentric(double forward, double strafe, double rotation, double gyroAngle) {
-    // Convert gyro angle to radians
-    double angleRad = (gyroAngle * PI) / 180.0;
-    
-    FieldCentricInput result;
-    // Perform field-centric to robot-centric conversion
-    result.forward = forward * cos(angleRad) + strafe * sin(angleRad);
-    result.strafe = -forward * sin(angleRad) + strafe * cos(angleRad);
-    result.rotation = rotation;
-    Serial.print("forward: " + String(forward) + " strafe: " + String(strafe) + " rotation: " + String(rotation));
-    Serial.println(" forward: " + String(result.forward) + " strafe: " + String(result.strafe) + " rotation: " + String(result.rotation));
-    return result;
+FieldCentricInput convertToRobotCentric(double forward, double strafe, double rotation, double gyroAngle)
+{
+  // Convert gyro angle to radians
+  double angleRad = (gyroAngle * PI) / 180.0;
+
+  FieldCentricInput result;
+  // Perform field-centric to robot-centric conversion
+  result.forward = constrain(forward * cos(angleRad) + strafe * sin(angleRad), -127, 128);
+  result.strafe = constrain(-forward * sin(angleRad) + strafe * cos(angleRad), -127, 128);
+  result.rotation = rotation;
+  Serial.print("forward: " + String(forward) + " strafe: " + String(strafe) + " rotation: " + String(rotation));
+  Serial.println(" forward: " + String(result.forward) + " strafe: " + String(result.strafe) + " rotation: " + String(result.rotation));
+
+  return result;
 }
 
 Heading gyro_thingy()
@@ -86,8 +86,8 @@ Heading gyro_thingy()
   Wire.endTransmission(); // Stop transmitting
 
   /* Decode received data to floating-point orientation values */
-  float pitch = IMURegisters::decodeProtocolSignedHundredthsFloat((char *)&data[0]) / 2.55;       // The cast is needed on arduino
-  float yaw = IMURegisters::decodeProtocolSignedHundredthsFloat((char *)&data[2]) / 2.55;     // The cast is needed on arduino
+  float pitch = IMURegisters::decodeProtocolSignedHundredthsFloat((char *)&data[0]) / 2.55;     // The cast is needed on arduino
+  float yaw = IMURegisters::decodeProtocolSignedHundredthsFloat((char *)&data[2]) / 2.55;       // The cast is needed on arduino
   float roll = IMURegisters::decodeProtocolSignedHundredthsFloat((char *)&data[4]) / 2.55;      // The cast is needed on arduino
   float heading = IMURegisters::decodeProtocolUnsignedHundredthsFloat((char *)&data[6]) / 2.55; // The cast is needed on arduino
 
@@ -106,27 +106,28 @@ Heading gyro_thingy()
   return h;
 }
 
-int8_t clean_joystick_input(int8_t input) {
-  if (abs(input) < 10) {  // Add deadzone to prevent drift
+int8_t clean_joystick_input(int8_t input)
+{
+  if (abs(input) < 10)
     return 0;
-  }
-  auto constrained = constrain(input, -120, 120);  // Fix max value to be symmetric
+  auto constrained = constrain(input, -127, 127); // Fix max value to be symmetric
   return constrained;
 }
 
-  //   ^
-  //   |
-  // Y |
-  //   |
-  //   |
-  //   +------------->
-  //          X
+//   ^
+//   |
+// Y |
+//   |
+//   |
+//   +------------->
+//          X
 
 void loop()
 {
   CrcLib::Update();
 
-  if(millis() % 10 != 0){ 
+  if (millis() % 10 != 0)
+  {
     return;
   }
 
@@ -153,19 +154,17 @@ void loop()
 
     // Convert joystick inputs to field-centric
     FieldCentricInput robotCentric = convertToRobotCentric(
-        joy_stick_state_left_Y, // Forward
+        joy_stick_state_left_Y,   // Forward
         -joy_stick_state_left_X,  // Strafe
         -joy_stick_state_right_X, // Rotation
         h.yaw * 2
-        // Current robot heading
     );
 
     // Apply converted values to motors
     CrcLib::MoveHolonomic(
-        robotCentric.forward, 
-        robotCentric.rotation, 
-        robotCentric.strafe, 
-        pin_FL, pin_BL, pin_FR, pin_BR
-    );
+        robotCentric.forward,
+        robotCentric.rotation,
+        robotCentric.strafe,
+        pin_FL, pin_BL, pin_FR, pin_BR);
   }
 }
