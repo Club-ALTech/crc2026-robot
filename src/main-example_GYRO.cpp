@@ -32,7 +32,7 @@ struct Heading
 };
 
 
-Heading gyro_thingy()
+Heading get_gyro_info()
 {
   // CrcLib::Update();
   /* Transmit I2C data request */
@@ -62,6 +62,14 @@ Heading gyro_thingy()
   h.roll = roll * 100;
   h.heading = heading * 100;
 
+  return h;
+}
+
+void loop()
+{
+  CrcLib::Update();
+  Heading h = get_gyro_info();
+
   /* Display orientation values */
   Serial.print("yaw: ");
   Serial.print(h.yaw);
@@ -72,12 +80,4 @@ Heading gyro_thingy()
   Serial.print("  heading:  ");
   Serial.print(h.heading);
   Serial.println("");
-
-  return h;
-}
-
-void loop()
-{
-  CrcLib::Update();
-  gyro_thingy();
 }
