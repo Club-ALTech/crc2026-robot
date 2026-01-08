@@ -1,12 +1,12 @@
 #include <Arduino.h>
 #include <CrcLib.h>
 
-uint8_t encoder = CRC_ANA_4;
+uint8_t encoder = CRC_DIG_1;
 // unsigned long pulseWidth = 0;
 
 void setup()
 {
-    CrcLib::Initialize();
+    // CrcLib::Initialize();
     // pinMode(encoder, INPUT);
     Serial.begin(115200);
     // ledcSetup(0, 1000, 10); // Utiliser LEDC pour mesurer le rapport cyclique si nécessaire
@@ -15,8 +15,8 @@ void setup()
 
 void loop()
 {
-    CrcLib::Update();
-    auto e_val = pulseIn(encoder, HIGH, 1000);
+    // CrcLib::Update();
+    auto e_val = pulseIn(encoder, HIGH, 2000);
     Serial.println("current: " + String(e_val));
     
     // Mesure approximative (non fiable pour 975 Hz)
