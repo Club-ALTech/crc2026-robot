@@ -1,23 +1,28 @@
 #include <Arduino.h>
 #include <CrcLib.h>
+#include "motors.hpp"
+#include "encoders.hpp"
 
-uint8_t encoder = CRC_DIG_1;
+Encoder encodeur(CRC_DIG_1, 2000);
+Motor moteur(CRC_PWM_1);
 // unsigned long pulseWidth = 0;
 
 void setup()
 {
-    // CrcLib::Initialize();
+    CrcLib::Initialize();
     // pinMode(encoder, INPUT);
     Serial.begin(115200);
     // ledcSetup(0, 1000, 10); // Utiliser LEDC pour mesurer le rapport cyclique si nécessaire
     //                         // Ou utiliser une librairie comme "PulsePosition" ou "InputCapture"
+
+    moteur.setup();
 }
 
 void loop()
 {
-    // CrcLib::Update();
-    auto e_val = pulseIn(encoder, HIGH, 2000);
-    Serial.println("current: " + String(e_val));
+    CrcLib::Update();
+
+    Serial.println("current: " + encodeur.getCurrentValue());
     
     // Mesure approximative (non fiable pour 975 Hz)
     // auto pulseWidth = pulseIn(encoder, HIGH, 2000); // Timeout 2ms
@@ -32,6 +37,9 @@ void loop()
     //     Serial.print("Angle: ");
     //     Serial.println(angle);
     // }
+
+
+    moteur.set_power(0.5);
 }
 
 

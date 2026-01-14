@@ -4,11 +4,13 @@
 
 class Motor
 {
+public:
     uint8_t _pin;
     float _low_power_limit, _high_power_limit;
 
     Motor(uint8_t pin, float low = -1, float high = 1)
-    : _pin(pin) {
+        : _pin(pin)
+    {
         this->set_power_limits(low, high);
     }
 
@@ -21,7 +23,7 @@ class Motor
     {
         return this->_pin;
     }
-
+    
     void set_power_limits(float low, float high)
     {
         this->_low_power_limit = constrain(low, -1, 0);
