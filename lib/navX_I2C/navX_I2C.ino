@@ -11,7 +11,7 @@ byte data[512];
 void setup()
 {
   Serial.begin(115200);
-  CrcLib::Initialize()
+  CrcLib::Initialize();
   Wire.begin(); // join i2c bus (address optional for master)
 
   for ( int i = 0; i < sizeof(data); i++ ) {
@@ -23,7 +23,6 @@ int register_address = NAVX_REG_YAW_L;
 
 void loop()
 {
-  static void CrcLib::Update()
   int i = 0;
   /* Transmit I2C data request */
   Wire.beginTransmission(NAVX_SENSOR_DEVICE_I2C_ADDRESS_7BIT); // Begin transmitting to navX-Sensor
