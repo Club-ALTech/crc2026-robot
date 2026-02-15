@@ -6,10 +6,10 @@
 #include <PID_v1.h>
 
 
-const int pin_FL = CRC_PWM_1;
-const int pin_FR = CRC_PWM_3;
-const int pin_BL = CRC_PWM_2;
-const int pin_BR = CRC_PWM_4;
+const int wheel_FL = CRC_PWM_1;
+const int wheel_FR = CRC_PWM_3;
+const int wheel_BL = CRC_PWM_2;
+const int wheel_BR = CRC_PWM_4;
 const int pin_test = CRC_PWM_12;
 
 
@@ -25,10 +25,10 @@ void setup()
 {
     CrcLib::Initialize();
 
-    CrcLib::InitializePwmOutput(pin_BL, false);
-    CrcLib::InitializePwmOutput(pin_BR, true); // Is normally true
-    CrcLib::InitializePwmOutput(pin_FL, false);
-    CrcLib::InitializePwmOutput(pin_FR, true); // Is normally true
+    CrcLib::InitializePwmOutput(wheel_BL, false);
+    CrcLib::InitializePwmOutput(wheel_BR, true); // Is normally true
+    CrcLib::InitializePwmOutput(wheel_FL, false);
+    CrcLib::InitializePwmOutput(wheel_FR, true); // Is normally true
     Serial.begin(115200);
 
     Wire.begin(); // join i2c bus (address optional for master)
@@ -39,12 +39,12 @@ void setup()
     pid.SetOutputLimits(-OUTPUT_LIM, OUTPUT_LIM);
 }
 
-void stop_motors()
+void soft_kill()
 {
-    CrcLib::SetPwmOutput(pin_BL, 0);
-    CrcLib::SetPwmOutput(pin_BR, 0);
-    CrcLib::SetPwmOutput(pin_FL, 0);
-    CrcLib::SetPwmOutput(pin_FR, 0);
+    CrcLib::SetPwmOutput(wheel_BL, 0);
+    CrcLib::SetPwmOutput(wheel_BR, 0);
+    CrcLib::SetPwmOutput(wheel_FL, 0);
+    CrcLib::SetPwmOutput(wheel_FR, 0);
 }
 
 int8_t clean_joystick_input(int8_t input)
@@ -88,14 +88,14 @@ void loop()
     {
         battery_voltage_limit = 15.0f;
         Serial.println("Battery LOW: " + String(CrcLib::GetBatteryVoltage()));
-        stop_motors();
+        soft_kill();
         return;
     }
 
     if (!CrcLib::IsCommValid())
     {
         // block everything if controller is not connected
-        stop_motors();
+        soft_kill();
         Serial.println("no com");
         return;
     }
@@ -152,7 +152,7 @@ void loop()
         robotCentric.forward,
         robotCentric.rotation,
         robotCentric.strafe,
-        pin_FL, pin_BL, pin_FR, pin_BR);
+        wheel_FL, wheel_BL, wheel_FR, wheel_BR);
 
     if (millis() % 25 != 0)
     {

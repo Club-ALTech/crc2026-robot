@@ -4,10 +4,10 @@
 const bool CLOCKWISE = true, COUNTER_CLOCKWISE = false;
 const char MAX_CLOCKWISE = 127, MAX_COUNTER_CLOCKWISE = -128;
 
-const int pin_FL = CRC_PWM_3;
-const int pin_FR = CRC_PWM_10;
-const int pin_BL = CRC_PWM_1;
-const int pin_BR = CRC_PWM_11;
+const int wheel_FL = CRC_PWM_3;
+const int wheel_FR = CRC_PWM_10;
+const int wheel_BL = CRC_PWM_1;
+const int wheel_BR = CRC_PWM_11;
 
 // Current motor speeds
 int8_t current_FL = 0;
@@ -21,10 +21,10 @@ const float ACCEL_RATE = 0.45; // Rate of acceleration (0-1). Higher = faster re
 void setup()
 {
   CrcLib::Initialize();
-  CrcLib::InitializePwmOutput(pin_BL, false);
-  CrcLib::InitializePwmOutput(pin_BR, false);
-  CrcLib::InitializePwmOutput(pin_FL, false);
-  CrcLib::InitializePwmOutput(pin_FR, false);
+  CrcLib::InitializePwmOutput(wheel_BL, false);
+  CrcLib::InitializePwmOutput(wheel_BR, false);
+  CrcLib::InitializePwmOutput(wheel_FL, false);
+  CrcLib::InitializePwmOutput(wheel_FR, false);
   Serial.begin(115200);
 }
 
@@ -118,7 +118,7 @@ void loop()
       // Serial.println("pin_FR_LX" + String((int8_t)-joy_stick_state_left_X));
       // Serial.println("=================================");
 
-      MoveHolonomic(-joy_stick_state_left_Y, joy_stick_state_right_X, joy_stick_state_left_X, pin_FL, pin_BL, pin_FR, pin_BR);
+      MoveHolonomic(-joy_stick_state_left_Y, joy_stick_state_right_X, joy_stick_state_left_X, wheel_FL, wheel_BL, wheel_FR, wheel_BR);
 
       // // Movement vers l'avant/arriere
       // CrcLib::SetPwmOutput(pin_BL, joy_stick_state_left_Y);
@@ -141,9 +141,9 @@ void loop()
   }
 
   else {
-    CrcLib::SetPwmOutput(pin_BL, 0);
-    CrcLib::SetPwmOutput(pin_BR, 0);
-    CrcLib::SetPwmOutput(pin_FL, 0);
-    CrcLib::SetPwmOutput(pin_FR, 0);
+    CrcLib::SetPwmOutput(wheel_BL, 0);
+    CrcLib::SetPwmOutput(wheel_BR, 0);
+    CrcLib::SetPwmOutput(wheel_FL, 0);
+    CrcLib::SetPwmOutput(wheel_FR, 0);
   }
 }

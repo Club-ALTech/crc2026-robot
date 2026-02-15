@@ -4,18 +4,18 @@
 const bool CLOCKWISE = true, COUNTER_CLOCKWISE = false;
 const char MAX_CLOCKWISE = 127, MAX_COUNTER_CLOCKWISE = -128;
 
-const int pin_FL = CRC_PWM_2;
-const int pin_FR = CRC_PWM_3;
-const int pin_BL = CRC_PWM_1;
-const int pin_BR = CRC_PWM_4;
+const int wheel_FL = CRC_PWM_2;
+const int wheel_FR = CRC_PWM_3;
+const int wheel_BL = CRC_PWM_1;
+const int wheel_BR = CRC_PWM_4;
 
 void setup()
 {
   CrcLib::Initialize();
-  CrcLib::InitializePwmOutput(pin_BL, false);
-  CrcLib::InitializePwmOutput(pin_BR, false);
-  CrcLib::InitializePwmOutput(pin_FL, false);
-  CrcLib::InitializePwmOutput(pin_FR, false);
+  CrcLib::InitializePwmOutput(wheel_BL, false);
+  CrcLib::InitializePwmOutput(wheel_BR, false);
+  CrcLib::InitializePwmOutput(wheel_FL, false);
+  CrcLib::InitializePwmOutput(wheel_FR, false);
   Serial.begin(115200);
 }
 
@@ -73,7 +73,7 @@ void loop()
 
     // if (millis() % 100 == 0)
     {
-      MoveHolonomic(-joy_stick_state_left_Y, joy_stick_state_right_X, joy_stick_state_left_X, pin_FL, pin_BL, pin_FR, pin_BR);
+      MoveHolonomic(-joy_stick_state_left_Y, joy_stick_state_right_X, joy_stick_state_left_X, wheel_FL, wheel_BL, wheel_FR, wheel_BR);
       // CrcLib::MoveHolonomic(joy_stick_state_left_Y, joy_stick_state_right_X, joy_stick_state_left_X, pin_FL, pin_BL, pin_FR, pin_BR);
 
       Serial.print("LX" + String(joy_stick_state_left_X)+ "\t");
