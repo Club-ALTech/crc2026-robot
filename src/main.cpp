@@ -13,13 +13,25 @@
  * =============
  */
 
-
 using pin_t = uint8_t;
 
 enum class AngleDomain : uint8_t
 {
     continuous, // 0 360
     mirror,     // -180 180
+};
+
+enum class AngleUnit : uint8_t
+{
+    radians,
+    degrees,
+};
+
+struct angle
+{
+    float value;
+    AngleDomain domain;
+    AngleUnit unit;
 };
 
 /** assumes source domain is oposite of target domain
@@ -107,38 +119,44 @@ float travel_deg(float from, float to)
 }
 
 /**
- * expects {AngleDomain::mirror}
- * expects radians
+ * using [EMA](https://en.wikipedia.org/wiki/Moving_average#Exponential_moving_average)
  */
-template <const int window_size>
 class AngleMovingAvg
 {
-    size_t _ptr;
-    float _values[window_size];
-    float _running_sum_x, _running_sum_y;
+    float _alpha, _running_avg_x, _running_avg_y;
+    bool _init;
 
 public:
     static const AngleDomain DOMAIN = AngleDomain::mirror;
 
-    AngleMovingAvg() : _ptr(0), _values{0}, _running_sum_x(0), _running_sum_y(0) {}
+    AngleMovingAvg(float alpha)
+        : _alpha(alpha), _running_avg_x(0), _running_avg_y(0), _init(false) {}
 
     void add(float a)
     {
-        this->_running_sum_x -= cos(this->_values[this->_ptr]);
-        this->_running_sum_y -= sin(this->_values[this->_ptr]);
-
-        this->_values[this->_ptr] = a;
-        
-        this->_running_sum_x += cos(this->_values[this->_ptr]);
-        this->_running_sum_y += sin(this->_values[this->_ptr]);
-
-        this->_ptr++;
-        this->_ptr %= window_size;
+        if (!this->_init)
+        {
+            this->_running_avg_x = cos(a);
+            this->_running_avg_y = sin(a);
+            this->_init = true;
+        }
+        else
+        {
+            this->_running_avg_x = this->_alpha * cos(a) + (1.0 - this->_alpha) * this->_running_avg_x;
+            this->_running_avg_y = this->_alpha * sin(a) + (1.0 - this->_alpha) * this->_running_avg_y;
+        }
     }
 
     float calc()
     {
-        return atan2(this->_running_sum_y, this->_running_sum_x);
+        if (!this->_init)
+            return NAN;
+        return atan2(this->_running_avg_y, this->_running_avg_x);
+    }
+
+    bool is_init()
+    {
+        return this->_init;
     }
 };
 
