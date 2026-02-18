@@ -1,4 +1,6 @@
 #include "AHRSProtocol.h"
+#include <Arduino.h>
+#include <Wire.h>
 
 #define ITERATION_DELAY_MS 10
 #define NAVX_SENSOR_DEVICE_I2C_ADDRESS_7BIT 0x32
