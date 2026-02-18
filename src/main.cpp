@@ -45,17 +45,18 @@ class PwmToAngleConverter
 {
 public:
     float _offset_deg;
-    int8_t _reverse;
+    bool _reverse;
     uint32_t _min_pulse, _max_pulse;
 
 public:
     PwmToAngleConverter(bool reverse = false, float offset_deg = 0, uint32_t min_pulse = 1, uint32_t max_pulse = 1024)
-        : _offset_deg(offset_deg), _reverse(reverse ? 1 : -1), _min_pulse(min_pulse), _max_pulse(max_pulse) {}
+        : _offset_deg(offset_deg), _reverse(reverse), _min_pulse(min_pulse), _max_pulse(max_pulse) {}
 
     float convert(uint32_t pwm)
     {
-        auto deg = _reverse * (pwm - this->_min_pulse) * 360.0 / (this->_max_pulse - this->_min_pulse);
-        return deg + _offset_deg;
+        auto deg = (pwm - this->_min_pulse) * 360 / (this->_max_pulse - this->_min_pulse);
+        deg = this->_reverse ? 360 - deg : deg;
+        return deg + this->_offset_deg;
     }
 
     void set_offset(float offset_deg)
@@ -71,7 +72,7 @@ float travel_deg(float from, float to)
     {
         return zeroed - 360;
     }
-    else if (zeroed < -PI)
+    else if (zeroed < -180)
     {
         return zeroed + 360;
     }
@@ -81,44 +82,39 @@ float travel_deg(float from, float to)
     }
 }
 
+/**
+ * expects {AngleDomain::mirror}
+ * expects radians
+ */
 template <const int window_size>
 class AngleMovingAvg
 {
     size_t _ptr;
     float _values[window_size];
+    float _running_sum_x, _running_sum_y;
 
 public:
-    AngleMovingAvg() : _ptr(0), _values({0}) {}
+    static const AngleDomain DOMAIN = AngleDomain::mirror;
 
-    void add(float v)
+    AngleMovingAvg() : _ptr(0), _values{0}, _running_sum(0), _running_sum_y(0) {}
+
+    void add(float a)
     {
+        this->_running_sum_x -= cos(this->_values[this->_ptr]);
+        this->_running_sum_y -= sin(this->_values[this->_ptr]);
+
         this->_values[this->_ptr] = v;
-        this._ptr++;
-        this._ptr %= window_size;
+        
+        this->_running_sum_x += cos(this->_values[this->_ptr]);
+        this->_running_sum_y += sin(this->_values[this->_ptr]);
+
+        this->_ptr++;
+        this->_ptr %= window_size;
     }
 
     float calc()
     {
-        const size_t num_deltas = window_size - 1;
-        float start_angle = this->_values[this->_ptr];
-
-        float deltas[num_deltas];
-        float last_angle = start_angle;
-        for (int i = 0; i < num_deltas; i++)
-        {
-            auto next_val_ptr = (i + 1 + this->_ptr) % window_size;
-            deltas[i] = travel_deg(last_angle, this->_values[next_val_ptr]);
-            last_angle = this->_values[next_val_ptr];
-        }
-
-        float total_deltas = 0;
-        for (auto delta : deltas)
-        {
-            total_deltas += delta;
-        }
-
-        float avg_delta = total_deltas / num_deltas;
-        return start_angle + avg_delta;
+        return atan2(this->_running_sum_y, this->_running_sum_x)
     }
 };
 
@@ -215,6 +211,27 @@ struct JoystickPair
 
 using pin_t = uint8_t;
 
+enum class AngleDomain : uint8_t
+{
+    continuous, // 0 360
+    mirror,     // -180 180
+};
+
+/** assumes source domain is oposite of target domain
+ *
+ */
+float convert_domain(float angle, AngleDomain target_domain)
+{
+    if (target_domain == AngleDomain::continuous)
+    {
+        return angle >= 0 ? angle : 360 + angle;
+    }
+    else
+    {
+        return angle <= 180 ? angle : -360 + angle;
+    }
+}
+
 /**
  * =============
  * CONFIGURATION
@@ -243,9 +260,9 @@ const pin_t BEAM_p = CRC_DIG_1;
 
 const int PRINT_TIMER_DELAY = 1000 / 20; // 20Hz
 
-const double FIELD_CENTRIC_P = 0;
+const double FIELD_CENTRIC_P = 7;
 const double FIELD_CENTRIC_I = 0;
-const double FIELD_CENTRIC_D = 0;
+const double FIELD_CENTRIC_D = 0.0011;
 
 const double FIELD_CENTRIC_OUTPUT_LIM = 60;
 const double FIELD_CENTRIC_SAMPLE_FREQ_HZ = 50;
@@ -263,12 +280,12 @@ NavX navx;
 CrcLib::Timer print_timer, battery_low_timeout;
 
 ReadPWM lift_PWM(LIFT_E_p), pitch_PWM(MANIP_PITCH_E_p), roll_PWM(MANIP_ROLL_E_p);
-PwmToAngleConverter lift_converter(), pitch_converter(), roll_converter();
-AngleMovingAvg<20> lift_angle(), pitch_angle(), roll_angle(); // TODO: 20 might be alot
+PwmToAngleConverter lift_converter, pitch_converter, roll_converter;
+AngleMovingAvg<200> lift_averager, pitch_averager, roll_averager; // TODO: 20 might be alot
 
-float input, output, setpoint;
+float input, output, setpoint = 0;
 QuickPID pid(&input, &output, &setpoint,
-             FIELD_CENTRIC_P, FIELD_CENTRIC_I, FIELD_CENTRIC_D, QuickPID::Action::direct);
+             FIELD_CENTRIC_P, FIELD_CENTRIC_I, FIELD_CENTRIC_D, QuickPID::Action::reverse);
 
 /**
  * ============
@@ -318,6 +335,7 @@ void soft_kill()
     CrcLib::SetPwmOutput(MANIP_ROLL_M_p, 0);
     // manip_belt_a.write(0);
     // manip_belt_b.write(0);
+    pid.SetOutputSum(0);
 }
 
 void loop()
@@ -373,12 +391,12 @@ void loop()
      * ------------------
      */
 
-    uint32_t manip_pitch;
-    pitch_PWM.read(manip_pitch);
-    uint32_t manip_roll;
-    roll_PWM.read(manip_roll);
-    uint32_t lift_height;
-    lift_PWM.read(lift_height);
+    uint32_t manip_pitch_signal;
+    pitch_PWM.read(manip_pitch_signal);
+    uint32_t manip_roll_signal;
+    roll_PWM.read(manip_roll_signal);
+    uint32_t lift_height_signal;
+    lift_PWM.read(lift_height_signal);
 
     bool beam_obstructed = CrcLib::GetDigitalInput(BEAM_p);
 
@@ -399,6 +417,13 @@ void loop()
             .x = (float)clean_joystick_input(joysticks_raw.right.x) / 5,
             .y = (float)clean_joystick_input(joysticks_raw.right.y) / 5,
         }};
+
+    lift_averager.add(lift_converter.convert(lift_height_signal));
+    pitch_averager.add(pitch_converter.convert(manip_pitch_signal));
+    roll_averager.add(roll_converter.convert(manip_roll_signal));
+    auto lift_deg = lift_averager.calc();
+    auto roll_deg = roll_averager.calc();
+    auto pitch_deg = pitch_averager.calc();
 
     float current_rotation = h.yaw; // TODO figure out
     // TODO: fix navx instead, will make a better resolution
@@ -432,20 +457,19 @@ void loop()
     input = travel_deg(current_rotation, target_rotation);
 
     /**
-     * -------------
-     * MOTOR OUTPUTS
-     * -------------
+     * -----------------------
+     * MOTOR OUTPUTS, CONTROLS
+     * -----------------------
      */
 
     if (true && pid.Compute())
     {
         // Convert joystick inputs to field-centric
         NavX::FieldCentricInput robotCentric = NavX::convertToRobotCentric(
-            joysticks_clean.left.y,  // Forward
-            -joysticks_clean.left.x, // Strafe
-            output,                  // Rotation
-            0                        // h.yaw * 2 // TODO: figure out WTF gyro angle even is
-        );
+            joysticks_clean.left.y, // Forward
+            joysticks_clean.left.x, // Strafe
+            output,                 // Rotation
+            -convert_domain(current_rotation, AngleDomain::mirror));
 
         // Apply converted values to motors
         CrcLib::MoveHolonomic(
@@ -462,7 +486,7 @@ void loop()
         CrcLib::SetPwmOutput(LIFT_R_M_p, trig_R);
     }
 
-    if (false && CrcLib::ReadDigitalChannel(BUTTON::COLORS_DOWN))
+    if (false && CrcLib::ReadDigitalChannel(BUTTON::COLORS_LEFT))
     {
         /* MANIPULATOR PITCH/ROLL */
         CrcLib::SetPwmOutput(MANIP_PITCH_M_p, trig_L);
@@ -475,6 +499,12 @@ void loop()
         // TODO: UNIMPLEMENTED
     }
 
+    if (CrcLib::ReadDigitalChannel(BUTTON::COLORS_DOWN))
+    {
+        Serial.println("softkilling");
+        soft_kill();
+    }
+
     /**
      * ----------------
      * SERIAL REPORTING
@@ -482,13 +512,30 @@ void loop()
      */
     if (print_timer.IsFinished())
     {
-        print_timer.Start(PRINT_TIMER_DELAY); // this will play catchup, but for now whatever
-        Serial.println("Battery voltage: " + String(CrcLib::GetBatteryVoltage()));
+        print_timer.Start(PRINT_TIMER_DELAY);
 
-        Serial.println("beam: " + String(beam_obstructed));
+        // Serial.println("Battery voltage: " + String(CrcLib::GetBatteryVoltage()));
 
-        Serial.println("h: " + String(lift_height * 360 / 1025) + "\tp: " + String(manip_pitch * 360 / 1025) + "\tr: " + String(manip_roll * 360 / 1025));
+        /* beam state */
+        // Serial.println("beam: " + String(beam_obstructed));
 
-        Serial.println("triggers:\tL:" + String(trig_L) + "\tR: " + String(trig_R));
+        /* reading encoders */
+        Serial.print("l: " + String(lift_converter.convert(lift_height_signal)) +
+                     "\tp: " + String(pitch_converter.convert(manip_pitch_signal)) +
+                     "\tr: " + String(roll_converter.convert(manip_roll_signal)));
+
+        // FIXME: averager does NOT work
+        Serial.println("\t\tl: " + String(lift_averager.calc()) +
+                       "\tp: " + String(pitch_averager.calc()) +
+                       "\tr: " + String(roll_averager.calc()));
+
+        /* controller trigger states */
+        // Serial.println("triggers:\tL:" + String(trig_L) + "\tR: " + String(trig_R));
+
+        /* cmp expected rotation with curent rotation*/
+        // Serial.println("expected: " + String(target_rotation) + "\tactual: " + String(current_rotation));
+
+        /* field centric PID info */
+        // Serial.println("input: " + String(input) + "\toutput: " + String(output));
     }
 }
