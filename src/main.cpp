@@ -27,13 +27,6 @@ enum class AngleUnit : uint8_t
     degrees,
 };
 
-struct angle
-{
-    float value;
-    AngleDomain domain;
-    AngleUnit unit;
-};
-
 /** assumes source domain is oposite of target domain
  *
  */
