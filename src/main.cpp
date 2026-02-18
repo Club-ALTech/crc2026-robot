@@ -13,6 +13,30 @@
  * =============
  */
 
+
+using pin_t = uint8_t;
+
+enum class AngleDomain : uint8_t
+{
+    continuous, // 0 360
+    mirror,     // -180 180
+};
+
+/** assumes source domain is oposite of target domain
+ *
+ */
+float convert_domain(float angle, AngleDomain target_domain)
+{
+    if (target_domain == AngleDomain::continuous)
+    {
+        return angle >= 0 ? angle : 360 + angle;
+    }
+    else
+    {
+        return angle <= 180 ? angle : -360 + angle;
+    }
+}
+
 class ReadPWM
 {
     uint32_t _last, _timeout;
@@ -96,14 +120,14 @@ class AngleMovingAvg
 public:
     static const AngleDomain DOMAIN = AngleDomain::mirror;
 
-    AngleMovingAvg() : _ptr(0), _values{0}, _running_sum(0), _running_sum_y(0) {}
+    AngleMovingAvg() : _ptr(0), _values{0}, _running_sum_x(0), _running_sum_y(0) {}
 
     void add(float a)
     {
         this->_running_sum_x -= cos(this->_values[this->_ptr]);
         this->_running_sum_y -= sin(this->_values[this->_ptr]);
 
-        this->_values[this->_ptr] = v;
+        this->_values[this->_ptr] = a;
         
         this->_running_sum_x += cos(this->_values[this->_ptr]);
         this->_running_sum_y += sin(this->_values[this->_ptr]);
@@ -114,7 +138,7 @@ public:
 
     float calc()
     {
-        return atan2(this->_running_sum_y, this->_running_sum_x)
+        return atan2(this->_running_sum_y, this->_running_sum_x);
     }
 };
 
@@ -208,29 +232,6 @@ struct JoystickPair
 {
     Joystick left, right;
 };
-
-using pin_t = uint8_t;
-
-enum class AngleDomain : uint8_t
-{
-    continuous, // 0 360
-    mirror,     // -180 180
-};
-
-/** assumes source domain is oposite of target domain
- *
- */
-float convert_domain(float angle, AngleDomain target_domain)
-{
-    if (target_domain == AngleDomain::continuous)
-    {
-        return angle >= 0 ? angle : 360 + angle;
-    }
-    else
-    {
-        return angle <= 180 ? angle : -360 + angle;
-    }
-}
 
 /**
  * =============
