@@ -300,7 +300,7 @@ CrcLib::Timer print_timer, battery_low_timeout;
 
 ReadPWM lift_PWM(LIFT_E_p), pitch_PWM(MANIP_PITCH_E_p), roll_PWM(MANIP_ROLL_E_p);
 PwmToAngleConverter lift_converter, pitch_converter, roll_converter;
-AngleMovingAvg<200> lift_averager, pitch_averager, roll_averager; // TODO: 20 might be alot
+AngleMovingAvg lift_averager(0.5), pitch_averager(0.5), roll_averager(0.5); // TODO: 20 might be alot
 
 float input, output, setpoint = 0;
 QuickPID pid(&input, &output, &setpoint,
