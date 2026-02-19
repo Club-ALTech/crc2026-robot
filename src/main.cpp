@@ -74,11 +74,14 @@ public:
     PwmToAngleConverter(bool reverse = false, float offset = 0, uint32_t min_pulse = 1, uint32_t max_pulse = 1024)
         : _offset(offset), _reverse(reverse), _min_pulse(min_pulse), _max_pulse(max_pulse) {}
 
-    float convert(uint32_t pwm)
+    angle<DOMAIN, UNIT> convert(uint32_t pwm)
     {
-        auto raw_angle = (pwm - this->_min_pulse) * 2 * PI / (this->_max_pulse - this->_min_pulse);
-        raw_angle = this->_reverse ? (2 * PI) - raw_angle : raw_angle;
-        return raw_angle + this->_offset;
+        auto raw_angle = (pwm - this->_min_pulse) * angle<DOMAIN, UNIT>::max_a() / (this->_max_pulse - this->_min_pulse);
+        if (this->_reverse)
+        {
+            raw_angle = angle<DOMAIN, UNIT>::max_a() - raw_angle;
+        }
+        return angle<DOMAIN, UNIT>::from(raw_angle + this->_offset);
     }
 
     void set_offset(float offset)
@@ -181,6 +184,19 @@ public:
         return (FieldCentricInput){.forward = field_forward,
                                    .strafe = field_strafe,
                                    .rotation = rotation};
+    }
+
+    static float stupid_fix(float yaw)
+    {
+        // TODO: fix navx instead, will make a better resolution
+        if (yaw < 180)
+        {
+            return map(yaw, 0.0, 100.0, 0.0, 180.0);
+        }
+        else
+        {
+            return map(yaw, 260.0, 360.0, 180.0, 360.0);
+        }
     }
 };
 
@@ -382,32 +398,14 @@ void loop()
             .y = (float)clean_joystick_input(joysticks_raw.right.y),
         }};
 
-    // lift_averager.add(
-    //     convert_domain(
-    //         lift_converter.convert(lift_height_signal),
-    //         angles::domain::mirror) /
-    //     180);
-    // pitch_averager.add(
-    //     convert_domain(
-    //         pitch_converter.convert(manip_pitch_signal),
-    //         angles::domain::mirror) /
-    //     180);
-    // roll_averager.add(
-    //     convert_domain(
-    //         roll_converter.convert(manip_roll_signal),
-    //         angles::domain::mirror) /
-    //     180);
+    lift_averager.add(lift_converter.convert(lift_height_signal)
+                          .template convert<domain::mirror>());
+    pitch_averager.add(pitch_converter.convert(manip_pitch_signal)
+                           .template convert<domain::mirror>());
+    roll_averager.add(roll_converter.convert(manip_roll_signal)
+                          .template convert<domain::mirror>());
 
-    float robot_rotation = h.yaw;
-    // TODO: fix navx instead, will make a better resolution
-    if (robot_rotation < 180)
-    {
-        robot_rotation = map(robot_rotation, 0.0, 100.0, 0.0, 180.0);
-    }
-    else
-    {
-        robot_rotation = map(robot_rotation, 260.0, 360.0, 180.0, 360.0);
-    }
+    float robot_rotation = NavX::stupid_fix(h.yaw);
 
     auto current_rotation = angle<domain::continuous, unit::degrees>::from(robot_rotation + field_centric_offset.value);
 
@@ -511,27 +509,46 @@ void loop()
     {
         print_timer.Start(PRINT_TIMER_DELAY);
 
-        // Serial.println("Battery voltage: " + String(CrcLib::GetBatteryVoltage()));
+        /* battery voltage */
+        if (false)
+        {
+            Serial.println("Battery voltage: " + String(CrcLib::GetBatteryVoltage()));
+        }
 
         /* beam state */
-        // Serial.println("beam: " + String(beam_obstructed));
+        if (false)
+        {
+            Serial.println("beam: " + String(beam_obstructed));
+        }
 
         /* reading encoders */
-        Serial.print("l: " + String(lift_converter.convert(lift_height_signal)) +
-                     "\tp: " + String(pitch_converter.convert(manip_pitch_signal)) +
-                     "\tr: " + String(roll_converter.convert(manip_roll_signal)));
+        if (true)
+        {
+            Serial.print("l: " + String(lift_converter.convert(lift_height_signal).value) +
+                         "\tp: " + String(pitch_converter.convert(manip_pitch_signal).value) +
+                         "\tr: " + String(roll_converter.convert(manip_roll_signal).value));
 
-        Serial.println("\t\tl: " + String(lift_averager.calc().template convert<domain::continuous>().template translate<unit::degrees>().value) +
-                       "\tp: " + String(pitch_averager.calc().template convert<domain::continuous>().template translate<unit::degrees>().value) +
-                       "\tr: " + String(roll_averager.calc().template convert<domain::continuous>().template translate<unit::degrees>().value));
+            Serial.println("\t\tl: " + String(lift_averager.calc().template convert<domain::continuous>().template translate<unit::degrees>().value) +
+                           "\tp: " + String(pitch_averager.calc().template convert<domain::continuous>().template translate<unit::degrees>().value) +
+                           "\tr: " + String(roll_averager.calc().template convert<domain::continuous>().template translate<unit::degrees>().value));
+        }
 
         /* controller trigger states */
-        Serial.println("triggers:\tL:" + String(trig_L) + "\tR: " + String(trig_R));
+        if (true)
+        {
+            Serial.println("triggers:\tL:" + String(trig_L) + "\tR: " + String(trig_R));
+        }
 
         /* cmp expected rotation with curent rotation*/
-        // Serial.println("expected: " + String(target_rotation) + "\tactual: " + String(current_rotation));
+        if (false)
+        {
+            Serial.println("expected: " + String(target_rotation.value) + "\tactual: " + String(current_rotation.value));
+        }
 
         /* field centric PID info */
-        // Serial.println("input: " + String(input) + "\toutput: " + String(output));
+        if (false)
+        {
+            Serial.println("input: " + String(input) + "\toutput: " + String(output));
+        }
     }
 }
