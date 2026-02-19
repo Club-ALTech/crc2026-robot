@@ -1,9 +1,10 @@
 #pragma once
-#include <Arduino.h>
+#include <stdint.h>
+#include <math.h>
 
-namespace angle
+namespace angles
 {
-    static constexpr float HALF_RAD = PI, HALF_DEG = 180;
+    static constexpr float HALF_RADIANS = M_PI, HALF_DEGREES = 180;
 
     enum class domain : uint8_t
     {
@@ -20,119 +21,144 @@ namespace angle
     /**
      * identity of a pair. useful for comparisons.
      */
-    template <const domain D, const unit U>
+    template <domain D, unit U>
     constexpr uint8_t identity()
     {
-        return (static_cast<uint8_t>(D) << 1) & static_cast<uint8_t>(U);
+        return (static_cast<uint8_t>(D) << 1) | static_cast<uint8_t>(U);
     }
 
-    template <const unit U>
+    template <unit U>
     constexpr float half()
     {
-        switch (U)
-        {
-        case unit::radians:
-            return HALF_RAD;
-        case unit::degrees:
-            return HALF_DEG;
-        }
+        if constexpr (U == unit::radians)
+            return HALF_RADIANS;
+        else
+            return HALF_DEGREES;
     }
 
-    template <const domain D, const unit U>
-    constexpr float min_a()
-    {
-        switch (D)
-        {
-        case domain::continuous:
-            return 0;
-        case domain::mirror:
-            return -half<U>();
-        }
-    }
-
-    template <const domain D, const unit U>
-    constexpr float max_a()
-    {
-        switch (D)
-        {
-        case domain::continuous:
-            return 2 * half<U>();
-        case domain::mirror:
-            return half<U>();
-        }
-    }
-
-    template <const domain D, const unit U>
+    template <domain D, unit U>
     struct angle
     {
         float value;
+
+        constexpr static float min_a()
+        {
+            if constexpr (D == domain::continuous)
+                return 0;
+            else
+                return -half<U>();
+        }
+
+        constexpr static float max_a()
+        {
+            if constexpr (D == domain::continuous)
+                return 2 * half<U>();
+            else
+                return half<U>();
+        }
+
+        /**
+         * convert an angle from one domain to the other
+         */
+        template <domain target_d>
+        constexpr angle<target_d, U> convert()
+        {
+            if constexpr (target_d == D)
+                return {this->value};
+            else if constexpr (target_d == domain::continuous)
+                return {this->value < 0
+                            ? angle<domain::continuous, U>::max_a() + this->value
+                            : this->value};
+            else
+                return {this->value >= half<U>()
+                            ? -angle<domain::continuous, U>::max_a() + this->value
+                            : this->value};
+        }
+
+        /**
+         * translate an angle from one unit to the other
+         */
+        template <unit target_u>
+        constexpr angle<D, target_u> translate()
+        {
+            if constexpr (target_u == U)
+                return *this;
+            else if constexpr (target_u == unit::radians)
+                return {this->value * angle<D, unit::radians>::max_a() / angle<D, unit::degrees>::max_a()};
+            else
+                return {this->value * angle<D, unit::degrees>::max_a() / angle<D, unit::radians>::max_a()};
+        }
+
+        constexpr angle<domain::mirror, U> travel(const angle<D, U> to)
+        {
+            auto from_v = this->normalize().template convert<domain::continuous>().value;
+            auto to_v = to.normalize().template convert<domain::continuous>().value;
+            auto zeroed = to_v - from_v;
+            if (zeroed > angle<domain::mirror, U>::max_a())
+            {
+                return {zeroed - angle<domain::continuous, U>::max_a()};
+            }
+            else if (zeroed < angle<domain::mirror, U>::min_a())
+            {
+                return {zeroed + angle<domain::continuous, U>::max_a()};
+            }
+            else
+            {
+                return {zeroed};
+            }
+        }
+
+        constexpr angle<D, U> normalize()
+        {
+            if constexpr (D == domain::continuous)
+            {
+                auto value = fmod(this->value, angle<domain::continuous, U>::max_a());
+                if (value < 0)
+                    value += angle<domain::continuous, U>::max_a();
+                return {value};
+            }
+            else
+                return this->template convert<domain::continuous>().normalize().template convert<domain::mirror>(); // convert<domain::mirror>(wrap(convert<domain::continuous>(a)));
+        }
+
+        /**
+         * automatically normalizes
+         */
+        constexpr static angle<D, U> from(const float v)
+        {
+            angle<D, U> a{v};
+            return a.normalize();
+        }
     };
 
     /**
      * convert an angle from one domain to the other
      */
-    template <const domain target_d, const domain src_d, const unit U>
-    angle<target_d, U> convert(const angle<src_d, U> &a)
+    template <domain target_d, domain src_d, unit U>
+    constexpr angle<target_d, U> convert(const angle<src_d, U> &a)
     {
-        if (target_d == src_d)
-            return a;
-        switch (target_d)
-        {
-        case domain::mirror:
-            return {a.value > half<U>()
-                        ? -max_a<domain::continuous, U>() + a.value
-                        : a.value};
-        case domain::continuous:
-            return {a.value < 0
-                        ? max_a<domain::continuous, U>() + a.value
-                        : a.value};
-        }
+        return a.convert();
     }
 
     /**
      * translate an angle from one unit to the other
      */
-    template <const domain D, const unit src_u, const unit target_u>
-    angle<D, target_u> translate(const angle<D, src_u> &a)
+    template <domain D, unit src_u, unit target_u>
+    constexpr angle<D, target_u> translate(const angle<D, src_u> &a)
     {
-        if (target_u == src_u)
-            return a;
-        switch (target_u)
-        {
-        case unit::radians:
-            return {a.value * max_a<D, unit::radians>() / max_a<D, unit::degrees>()};
-        case unit::degrees:
-            return {a.value * max_a<D, unit::degrees>() / max_a<D, unit::radians>()};
-        }
+        return a.translate();
     }
 
-    template <const domain D, const unit U>
-    angle<domain::mirror, U> travel(angle<D, U> from, angle<D, U> to)
+    template <domain D, unit U>
+    constexpr angle<domain::mirror, U> travel(const angle<D, U> &from, const angle<D, U> &to)
     {
-        auto zeroed = convert<domain::continuous>(to).value - convert<domain::continuous>(from).value;
-        if (zeroed > max_a<domain::mirror, U>())
-        {
-            return {zeroed - max_a<domain::continuous, U>()};
-        }
-        else if (zeroed < min_a<domain::mirror, U>())
-        {
-            return {zeroed + max_a<domain::continuous, U>()};
-        }
-        else
-        {
-            return {zeroed};
-        }
+        return from.travel(to);
     }
 
-    template <const domain D, const unit U>
-    angle<D, U> wrap(angle<D, U> a)
+    template <domain D, unit U>
+    constexpr angle<D, U> normalize(angle<D, U> &a)
     {
-        if (D == domain::continuous)
-        {
-            auto value = fmod(a.value, max_a<domain::continuous, U>());
-            return {value};
-        }
-        return convert<domain::mirror>(wrap(convert<domain::continuous>(a)));
+        return a.normalize();
     }
 
     /**
@@ -144,32 +170,34 @@ namespace angle
         bool _init;
 
     public:
-        static const domain DOMAIN = domain::mirror;
-        static const unit UNIT = unit::radians;
+        static constexpr domain DOMAIN = domain::mirror;
+        static constexpr unit UNIT = unit::radians;
 
         AngleMovingAvg(float alpha)
             : _alpha(alpha), _running_avg_x(0), _running_avg_y(0), _init(false) {}
 
-        void add(float a)
+        void add(angle<DOMAIN, UNIT> a)
         {
+            auto x = cos(a.value);
+            auto y = sin(a.value);
             if (!this->_init)
             {
-                this->_running_avg_x = cos(a);
-                this->_running_avg_y = sin(a);
+                this->_running_avg_x = x;
+                this->_running_avg_y = y;
                 this->_init = true;
             }
             else
             {
-                this->_running_avg_x = this->_alpha * cos(a) + (1.0 - this->_alpha) * this->_running_avg_x;
-                this->_running_avg_y = this->_alpha * sin(a) + (1.0 - this->_alpha) * this->_running_avg_y;
+                this->_running_avg_x = this->_alpha * x + (1.0 - this->_alpha) * this->_running_avg_x;
+                this->_running_avg_y = this->_alpha * y + (1.0 - this->_alpha) * this->_running_avg_y;
             }
         }
 
-        float calc()
+        angle<DOMAIN, UNIT> calc()
         {
             if (!this->_init)
-                return NAN;
-            return atan2(this->_running_avg_y, this->_running_avg_x);
+                return {NAN};
+            return angle<DOMAIN, UNIT>::from(atan2(this->_running_avg_y, this->_running_avg_x));
         }
 
         bool is_init()
@@ -177,7 +205,4 @@ namespace angle
             return this->_init;
         }
     };
-
-    const angle<domain::continuous, unit::radians> my_angle_ex{PI};
-    auto my_angle_ex_converted_domain = convert<domain::continuous>(my_angle_ex);
 };

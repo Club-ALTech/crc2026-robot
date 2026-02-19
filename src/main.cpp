@@ -6,7 +6,9 @@
 #include <Smoothed.h>
 #include "AHRSProtocol.h"
 #include <QuickPID.h>
-#include <angles.hpp>
+#include <angles.hpp> // angles
+
+using namespace angles;
 
 /**
  * =============
@@ -16,24 +18,12 @@
 
 using pin_t = uint8_t;
 
-enum class AngleDomain : uint8_t
-{
-    continuous, // 0 360
-    mirror,     // -180 180
-};
-
-enum class AngleUnit : uint8_t
-{
-    radians,
-    degrees,
-};
-
 /**
  * assumes source domain is oposite of target domain
  */
-float convert_domain(float angle, AngleDomain target_domain)
+float convert_domain(float angle, angles::domain target_domain)
 {
-    if (target_domain == AngleDomain::continuous)
+    if (target_domain == angles::domain::continuous)
     {
         return angle >= 0 ? angle : 360 + angle;
     }
@@ -78,17 +68,17 @@ class PwmToAngleConverter
     uint32_t _min_pulse, _max_pulse;
 
 public:
-    static const AngleDomain DOMAIN = AngleDomain::continuous;
-    static const AngleUnit UNIT = AngleUnit::radians;
+    static const angles::domain DOMAIN = angles::domain::continuous;
+    static const angles::unit UNIT = angles::unit::radians;
 
     PwmToAngleConverter(bool reverse = false, float offset = 0, uint32_t min_pulse = 1, uint32_t max_pulse = 1024)
         : _offset(offset), _reverse(reverse), _min_pulse(min_pulse), _max_pulse(max_pulse) {}
 
     float convert(uint32_t pwm)
     {
-        auto angle = (pwm - this->_min_pulse) * 2 * PI / (this->_max_pulse - this->_min_pulse);
-        angle = this->_reverse ? (2 * PI) - angle : angle;
-        return angle + this->_offset;
+        auto raw_angle = (pwm - this->_min_pulse) * 2 * PI / (this->_max_pulse - this->_min_pulse);
+        raw_angle = this->_reverse ? (2 * PI) - raw_angle : raw_angle;
+        return raw_angle + this->_offset;
     }
 
     void set_offset(float offset)
@@ -113,49 +103,6 @@ float travel_deg(float from, float to)
         return zeroed;
     }
 }
-
-/**
- * using [EMA](https://en.wikipedia.org/wiki/Moving_average#Exponential_moving_average)
- */
-class AngleMovingAvg
-{
-    float _alpha, _running_avg_x, _running_avg_y;
-    bool _init;
-
-public:
-    static const AngleDomain DOMAIN = AngleDomain::mirror;
-    static const AngleUnit UNIT = AngleUnit::radians;
-
-    AngleMovingAvg(float alpha)
-        : _alpha(alpha), _running_avg_x(0), _running_avg_y(0), _init(false) {}
-
-    void add(float a)
-    {
-        if (!this->_init)
-        {
-            this->_running_avg_x = cos(a);
-            this->_running_avg_y = sin(a);
-            this->_init = true;
-        }
-        else
-        {
-            this->_running_avg_x = this->_alpha * cos(a) + (1.0 - this->_alpha) * this->_running_avg_x;
-            this->_running_avg_y = this->_alpha * sin(a) + (1.0 - this->_alpha) * this->_running_avg_y;
-        }
-    }
-
-    float calc()
-    {
-        if (!this->_init)
-            return NAN;
-        return atan2(this->_running_avg_y, this->_running_avg_x);
-    }
-
-    bool is_init()
-    {
-        return this->_init;
-    }
-};
 
 int8_t clean_joystick_input(int8_t input)
 {
@@ -288,6 +235,8 @@ const double FIELD_CENTRIC_SAMPLE_FREQ_HZ = 50;
  * ========================
  */
 
+angle<domain::continuous, unit::degrees> field_centric_offset{0};
+
 Servo manip_belt_a, manip_belt_b;
 
 NavX navx;
@@ -296,7 +245,7 @@ CrcLib::Timer print_timer, battery_low_timeout;
 
 ReadPWM lift_PWM(LIFT_E_p), pitch_PWM(MANIP_PITCH_E_p), roll_PWM(MANIP_ROLL_E_p);
 PwmToAngleConverter lift_converter, pitch_converter, roll_converter;
-AngleMovingAvg lift_averager(0.2), pitch_averager(0.2), roll_averager(0.2);
+angles::AngleMovingAvg lift_averager(0.2), pitch_averager(0.2), roll_averager(0.2);
 
 float input, output, setpoint = 0;
 QuickPID pid(&input, &output, &setpoint,
@@ -364,7 +313,7 @@ void loop()
      */
 
     static float battery_voltage_limit = 11.0;
-    if (true && CrcLib::GetBatteryVoltage() < battery_voltage_limit)
+    if (false && CrcLib::GetBatteryVoltage() < battery_voltage_limit)
     {
         // TODO: figure out something more graceful.
         battery_voltage_limit = 15.0f;
@@ -425,40 +374,42 @@ void loop()
 
     auto joysticks_clean = (JoystickPair){
         .left = {
-            .x = (float)clean_joystick_input(joysticks_raw.left.x) / 5,
-            .y = (float)clean_joystick_input(joysticks_raw.left.y) / 5,
+            .x = (float)clean_joystick_input(joysticks_raw.left.x),
+            .y = (float)clean_joystick_input(joysticks_raw.left.y),
         },
         .right = {
-            .x = (float)clean_joystick_input(joysticks_raw.right.x) / 5,
-            .y = (float)clean_joystick_input(joysticks_raw.right.y) / 5,
+            .x = (float)clean_joystick_input(joysticks_raw.right.x),
+            .y = (float)clean_joystick_input(joysticks_raw.right.y),
         }};
 
-    lift_averager.add(
-        convert_domain(
-            lift_converter.convert(lift_height_signal),
-            AngleDomain::mirror) /
-        180);
-    pitch_averager.add(
-        convert_domain(
-            pitch_converter.convert(manip_pitch_signal),
-            AngleDomain::mirror) /
-        180);
-    roll_averager.add(
-        convert_domain(
-            roll_converter.convert(manip_roll_signal),
-            AngleDomain::mirror) /
-        180);
+    // lift_averager.add(
+    //     convert_domain(
+    //         lift_converter.convert(lift_height_signal),
+    //         angles::domain::mirror) /
+    //     180);
+    // pitch_averager.add(
+    //     convert_domain(
+    //         pitch_converter.convert(manip_pitch_signal),
+    //         angles::domain::mirror) /
+    //     180);
+    // roll_averager.add(
+    //     convert_domain(
+    //         roll_converter.convert(manip_roll_signal),
+    //         angles::domain::mirror) /
+    //     180);
 
-    float current_rotation = h.yaw; // TODO figure out
+    float robot_rotation = h.yaw;
     // TODO: fix navx instead, will make a better resolution
-    if (current_rotation < 180)
+    if (robot_rotation < 180)
     {
-        current_rotation = map(current_rotation, 0.0, 100.0, 0.0, 180.0);
+        robot_rotation = map(robot_rotation, 0.0, 100.0, 0.0, 180.0);
     }
     else
     {
-        current_rotation = map(current_rotation, 260.0, 360.0, 180.0, 360.0);
+        robot_rotation = map(robot_rotation, 260.0, 360.0, 180.0, 360.0);
     }
+
+    auto current_rotation = angle<domain::continuous, unit::degrees>::from(robot_rotation + field_centric_offset.value);
 
     /**
      * ---------------
@@ -466,8 +417,9 @@ void loop()
      * ---------------
      */
 
-    static float target_rotation = NAN;
-    if (isnan(target_rotation))
+    static angle<domain::continuous, unit::degrees> target_rotation{NAN};
+
+    if (isnan(target_rotation.value))
     {
         // NOTE: intialize target to the current rotation to avoid the robot trying to move right after turning on
         target_rotation = current_rotation;
@@ -475,10 +427,11 @@ void loop()
 
     if (abs(joysticks_clean.right.x) > 5 || abs(joysticks_clean.right.y) > 5)
     {
-        target_rotation = 180 - (atan2(joysticks_clean.right.x, joysticks_clean.right.y) * 180 / PI);
+        // TODO: ugly fucking line, clean up eventually. but for now, it works.
+        target_rotation = angle<domain::continuous, unit::degrees>::from(180 - (atan2(joysticks_clean.right.x, joysticks_clean.right.y) * 180 / PI));
     }
 
-    input = travel_deg(current_rotation, target_rotation);
+    input = current_rotation.travel(target_rotation).value;
 
     /**
      * -----------------------
@@ -486,14 +439,31 @@ void loop()
      * -----------------------
      */
 
-    if (false && pid.Compute())
+    if (CrcLib::ReadDigitalChannel(BUTTON::SELECT))
     {
+        /* RESET FIELD CENTRIC REFERENCE*/
+        field_centric_offset = angle<domain::continuous, unit::degrees>::from(field_centric_offset.value - current_rotation.value);
+    }
+
+    if (true && CrcLib::ReadDigitalChannel(BUTTON::COLORS_DOWN))
+    {
+        /* PRECISION MODE */
+        const float REDUCTION = 0.3;
+        joysticks_clean.left.x *= REDUCTION;
+        joysticks_clean.left.y *= REDUCTION;
+        joysticks_clean.right.x *= REDUCTION;
+        joysticks_clean.right.y *= REDUCTION;
+    }
+
+    if (true && pid.Compute())
+    {
+        /* FIELD CENTRIC HOLONOMIC */
         // Convert joystick inputs to field-centric
         NavX::FieldCentricInput robotCentric = NavX::convertToRobotCentric(
             joysticks_clean.left.y, // Forward
             joysticks_clean.left.x, // Strafe
             output,                 // Rotation
-            -convert_domain(current_rotation, AngleDomain::mirror));
+            -current_rotation.convert<angles::domain::mirror>().value);
 
         // Apply converted values to motors
         CrcLib::MoveHolonomic(
@@ -517,13 +487,16 @@ void loop()
         CrcLib::SetPwmOutput(MANIP_ROLL_M_p, trig_R);
     }
 
-    if (false && CrcLib::ReadDigitalChannel(BUTTON::COLORS_RIGHT))
+    if (true && CrcLib::ReadDigitalChannel(BUTTON::COLORS_RIGHT))
     {
         /* BELTS */
-        // TODO: UNIMPLEMENTED
+        auto speed_L = map(trig_L, -128, 127, 1000, 2000);
+        auto speed_R = map(trig_R, -128, 127, 1000, 2000);
+        // manip_belt_a.writeMicroseconds(speed_L);
+        // manip_belt_b.writeMicroseconds(speed_R);
     }
 
-    if (CrcLib::ReadDigitalChannel(BUTTON::COLORS_DOWN))
+    if (CrcLib::ReadDigitalChannel(BUTTON::START))
     {
         Serial.println("softkilling");
         soft_kill();
@@ -548,13 +521,12 @@ void loop()
                      "\tp: " + String(pitch_converter.convert(manip_pitch_signal)) +
                      "\tr: " + String(roll_converter.convert(manip_roll_signal)));
 
-        // FIXME: averager does NOT work
-        Serial.println("\t\tl: " + String(convert_domain(lift_averager.calc() * 180, AngleDomain::continuous)) +
-                       "\tp: " + String(convert_domain(pitch_averager.calc() * 180, AngleDomain::continuous)) +
-                       "\tr: " + String(convert_domain(roll_averager.calc() * 180, AngleDomain::continuous)));
+        Serial.println("\t\tl: " + String(lift_averager.calc().template convert<domain::continuous>().template translate<unit::degrees>().value) +
+                       "\tp: " + String(pitch_averager.calc().template convert<domain::continuous>().template translate<unit::degrees>().value) +
+                       "\tr: " + String(roll_averager.calc().template convert<domain::continuous>().template translate<unit::degrees>().value));
 
         /* controller trigger states */
-        // Serial.println("triggers:\tL:" + String(trig_L) + "\tR: " + String(trig_R));
+        Serial.println("triggers:\tL:" + String(trig_L) + "\tR: " + String(trig_R));
 
         /* cmp expected rotation with curent rotation*/
         // Serial.println("expected: " + String(target_rotation) + "\tactual: " + String(current_rotation));
