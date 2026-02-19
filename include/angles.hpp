@@ -7,8 +7,8 @@ namespace angle
 
     enum class domain : uint8_t
     {
-        continuous,
-        mirror,
+        continuous, // ex: 0 to 360
+        mirror, // ex: -180 to 180
     };
 
     enum class unit : uint8_t
@@ -17,6 +17,9 @@ namespace angle
         degrees,
     };
 
+    /**
+     * identity of a pair. useful for comparisons.
+     */
     template <const domain D, const unit U>
     constexpr uint8_t identity()
     {
