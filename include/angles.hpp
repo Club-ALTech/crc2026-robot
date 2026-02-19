@@ -8,7 +8,7 @@ namespace angle
     enum class domain : uint8_t
     {
         continuous, // ex: 0 to 360
-        mirror, // ex: -180 to 180
+        mirror,     // ex: -180 to 180
     };
 
     enum class unit : uint8_t
@@ -68,6 +68,9 @@ namespace angle
         float value;
     };
 
+    /**
+     * convert an angle from one domain to the other
+     */
     template <const domain target_d, const domain src_d, const unit U>
     angle<target_d, U> convert(const angle<src_d, U> &a)
     {
@@ -83,6 +86,23 @@ namespace angle
             return {a.value < 0
                         ? max_a<domain::continuous, U>() + a.value
                         : a.value};
+        }
+    }
+
+    /**
+     * translate an angle from one unit to the other
+     */
+    template <const domain D, const unit src_u, const unit target_u>
+    angle<D, target_u> translate(const angle<D, src_u> &a)
+    {
+        if (target_u == src_u)
+            return a;
+        switch (target_u)
+        {
+        case unit::radians:
+            return {a.value * max_a<D, unit::radians>() / max_a<D, unit::degrees>()};
+        case unit::degrees:
+            return {a.value * max_a<D, unit::degrees>() / max_a<D, unit::radians>()};
         }
     }
 
