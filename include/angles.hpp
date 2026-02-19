@@ -3,68 +3,158 @@
 
 namespace angle
 {
+    static constexpr float HALF_RAD = PI, HALF_DEG = 180;
 
     enum class domain : uint8_t
     {
-        continuous, // 0 360
-        mirror,     // -180 180
+        continuous,
+        mirror,
     };
 
-    enum class AngleUnit : uint8_t
+    enum class unit : uint8_t
     {
         radians,
         degrees,
     };
 
-    template <const domain D, const AngleUnit U>
+    template <const domain D, const unit U>
+    constexpr uint8_t identity()
+    {
+        return (static_cast<uint8_t>(D) << 1) & static_cast<uint8_t>(U);
+    }
+
+    template <const unit U>
+    constexpr float half()
+    {
+        switch (U)
+        {
+        case unit::radians:
+            return HALF_RAD;
+        case unit::degrees:
+            return HALF_DEG;
+        }
+    }
+
+    template <const domain D, const unit U>
+    constexpr float min_a()
+    {
+        switch (D)
+        {
+        case domain::continuous:
+            return 0;
+        case domain::mirror:
+            return -half<U>();
+        }
+    }
+
+    template <const domain D, const unit U>
+    constexpr float max_a()
+    {
+        switch (D)
+        {
+        case domain::continuous:
+            return 2 * half<U>();
+        case domain::mirror:
+            return half<U>();
+        }
+    }
+
+    template <const domain D, const unit U>
     struct angle
     {
-        // TODO: these static members might be pointless...
-        static const domain _domain = D;
-        static const AngleUnit _unit = U;
         float value;
     };
 
-    /**
-     *  assumes source domain is oposite of target domain
-     */
-
-    template <const domain target_d, const domain src_d, const AngleUnit src_u>
-    angle<target_d, src_u> convert_domain(const angle<src_d, src_u> &a)
+    template <const domain target_d, const domain src_d, const unit U>
+    angle<target_d, U> convert(const angle<src_d, U> &a)
     {
-        // CHORE: remove old impl that was used as reference
-        // if (target_domain == AngleDomain::continuous)
-        // {
-        //     return angle >= 0 ? angle : 360 + angle;
-        // }
-        // else
-        // {
-        //     return angle <= 180 ? angle : -360 + angle;
-        // }
-
         if (target_d == src_d)
             return a;
-        if (target_d ==  
-        return {0};
+        switch (target_d)
+        {
+        case domain::mirror:
+            return {a.value > half<U>()
+                        ? -max_a<domain::continuous, U>() + a.value
+                        : a.value};
+        case domain::continuous:
+            return {a.value < 0
+                        ? max_a<domain::continuous, U>() + a.value
+                        : a.value};
+        }
     }
 
-    float travel_deg(float from, float to)
+    template <const domain D, const unit U>
+    angle<domain::mirror, U> travel(angle<D, U> from, angle<D, U> to)
     {
-        auto zeroed = to - from;
-        if (zeroed > 180)
+        auto zeroed = convert<domain::continuous>(to).value - convert<domain::continuous>(from).value;
+        if (zeroed > max_a<domain::mirror, U>())
         {
-            return zeroed - 360;
+            return {zeroed - max_a<domain::continuous, U>()};
         }
-        else if (zeroed < -180)
+        else if (zeroed < min_a<domain::mirror, U>())
         {
-            return zeroed + 360;
+            return {zeroed + max_a<domain::continuous, U>()};
         }
         else
         {
-            return zeroed;
+            return {zeroed};
         }
     }
 
-    const angle<domain::continuous, AngleUnit::radians> my_angle_ex{PI};
-    auto my_angle_ex_converted_domain = convert_domain<domain::continuous>(my_angle_ex);
+    template <const domain D, const unit U>
+    angle<D, U> wrap(angle<D, U> a)
+    {
+        if (D == domain::continuous)
+        {
+            auto value = fmod(a.value, max_a<domain::continuous, U>());
+            return {value};
+        }
+        return convert<domain::mirror>(wrap(convert<domain::continuous>(a)));
+    }
+
+    /**
+     * using [EMA](https://en.wikipedia.org/wiki/Moving_average#Exponential_moving_average)
+     */
+    class AngleMovingAvg
+    {
+        float _alpha, _running_avg_x, _running_avg_y;
+        bool _init;
+
+    public:
+        static const domain DOMAIN = domain::mirror;
+        static const unit UNIT = unit::radians;
+
+        AngleMovingAvg(float alpha)
+            : _alpha(alpha), _running_avg_x(0), _running_avg_y(0), _init(false) {}
+
+        void add(float a)
+        {
+            if (!this->_init)
+            {
+                this->_running_avg_x = cos(a);
+                this->_running_avg_y = sin(a);
+                this->_init = true;
+            }
+            else
+            {
+                this->_running_avg_x = this->_alpha * cos(a) + (1.0 - this->_alpha) * this->_running_avg_x;
+                this->_running_avg_y = this->_alpha * sin(a) + (1.0 - this->_alpha) * this->_running_avg_y;
+            }
+        }
+
+        float calc()
+        {
+            if (!this->_init)
+                return NAN;
+            return atan2(this->_running_avg_y, this->_running_avg_x);
+        }
+
+        bool is_init()
+        {
+            return this->_init;
+        }
+    };
+
+    const angle<domain::continuous, unit::radians> my_angle_ex{PI};
+    auto my_angle_ex_converted_domain = convert<domain::continuous>(my_angle_ex);
 };

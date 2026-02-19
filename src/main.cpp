@@ -6,6 +6,7 @@
 #include <Smoothed.h>
 #include "AHRSProtocol.h"
 #include <QuickPID.h>
+#include <angles.hpp>
 
 /**
  * =============
@@ -27,8 +28,8 @@ enum class AngleUnit : uint8_t
     degrees,
 };
 
-/** assumes source domain is oposite of target domain
- *
+/**
+ * assumes source domain is oposite of target domain
  */
 float convert_domain(float angle, AngleDomain target_domain)
 {
@@ -72,25 +73,27 @@ public:
 
 class PwmToAngleConverter
 {
-public:
-    float _offset_deg;
+    float _offset;
     bool _reverse;
     uint32_t _min_pulse, _max_pulse;
 
 public:
-    PwmToAngleConverter(bool reverse = false, float offset_deg = 0, uint32_t min_pulse = 1, uint32_t max_pulse = 1024)
-        : _offset_deg(offset_deg), _reverse(reverse), _min_pulse(min_pulse), _max_pulse(max_pulse) {}
+    static const AngleDomain DOMAIN = AngleDomain::continuous;
+    static const AngleUnit UNIT = AngleUnit::radians;
+
+    PwmToAngleConverter(bool reverse = false, float offset = 0, uint32_t min_pulse = 1, uint32_t max_pulse = 1024)
+        : _offset(offset), _reverse(reverse), _min_pulse(min_pulse), _max_pulse(max_pulse) {}
 
     float convert(uint32_t pwm)
     {
-        auto deg = (pwm - this->_min_pulse) * 360 / (this->_max_pulse - this->_min_pulse);
-        deg = this->_reverse ? 360 - deg : deg;
-        return deg + this->_offset_deg;
+        auto angle = (pwm - this->_min_pulse) * 2 * PI / (this->_max_pulse - this->_min_pulse);
+        angle = this->_reverse ? (2 * PI) - angle : angle;
+        return angle + this->_offset;
     }
 
-    void set_offset(float offset_deg)
+    void set_offset(float offset)
     {
-        this->_offset_deg = offset_deg;
+        this->_offset = offset;
     }
 };
 
@@ -121,6 +124,7 @@ class AngleMovingAvg
 
 public:
     static const AngleDomain DOMAIN = AngleDomain::mirror;
+    static const AngleUnit UNIT = AngleUnit::radians;
 
     AngleMovingAvg(float alpha)
         : _alpha(alpha), _running_avg_x(0), _running_avg_y(0), _init(false) {}
@@ -163,7 +167,6 @@ int8_t clean_joystick_input(int8_t input)
 
 class NavX
 {
-
     static const int ITERATION_DELAY_MS = 10;
     static const int NAVX_SENSOR_DEVICE_I2C_ADDRESS_7BIT = 0x32;
     static const int NUM_BYTES_TO_READ = 8;
@@ -293,7 +296,7 @@ CrcLib::Timer print_timer, battery_low_timeout;
 
 ReadPWM lift_PWM(LIFT_E_p), pitch_PWM(MANIP_PITCH_E_p), roll_PWM(MANIP_ROLL_E_p);
 PwmToAngleConverter lift_converter, pitch_converter, roll_converter;
-AngleMovingAvg lift_averager(0.5), pitch_averager(0.5), roll_averager(0.5); // TODO: 20 might be alot
+AngleMovingAvg lift_averager(0.2), pitch_averager(0.2), roll_averager(0.2);
 
 float input, output, setpoint = 0;
 QuickPID pid(&input, &output, &setpoint,
@@ -361,7 +364,7 @@ void loop()
      */
 
     static float battery_voltage_limit = 11.0;
-    if (CrcLib::GetBatteryVoltage() < battery_voltage_limit)
+    if (true && CrcLib::GetBatteryVoltage() < battery_voltage_limit)
     {
         // TODO: figure out something more graceful.
         battery_voltage_limit = 15.0f;
@@ -370,7 +373,7 @@ void loop()
         return;
     }
 
-    if (!CrcLib::IsCommValid())
+    if (true && !CrcLib::IsCommValid())
     {
         // block everything if controller is not connected
         soft_kill();
@@ -430,12 +433,21 @@ void loop()
             .y = (float)clean_joystick_input(joysticks_raw.right.y) / 5,
         }};
 
-    lift_averager.add(lift_converter.convert(lift_height_signal));
-    pitch_averager.add(pitch_converter.convert(manip_pitch_signal));
-    roll_averager.add(roll_converter.convert(manip_roll_signal));
-    auto lift_deg = lift_averager.calc();
-    auto roll_deg = roll_averager.calc();
-    auto pitch_deg = pitch_averager.calc();
+    lift_averager.add(
+        convert_domain(
+            lift_converter.convert(lift_height_signal),
+            AngleDomain::mirror) /
+        180);
+    pitch_averager.add(
+        convert_domain(
+            pitch_converter.convert(manip_pitch_signal),
+            AngleDomain::mirror) /
+        180);
+    roll_averager.add(
+        convert_domain(
+            roll_converter.convert(manip_roll_signal),
+            AngleDomain::mirror) /
+        180);
 
     float current_rotation = h.yaw; // TODO figure out
     // TODO: fix navx instead, will make a better resolution
@@ -474,7 +486,7 @@ void loop()
      * -----------------------
      */
 
-    if (true && pid.Compute())
+    if (false && pid.Compute())
     {
         // Convert joystick inputs to field-centric
         NavX::FieldCentricInput robotCentric = NavX::convertToRobotCentric(
@@ -537,9 +549,9 @@ void loop()
                      "\tr: " + String(roll_converter.convert(manip_roll_signal)));
 
         // FIXME: averager does NOT work
-        Serial.println("\t\tl: " + String(lift_averager.calc()) +
-                       "\tp: " + String(pitch_averager.calc()) +
-                       "\tr: " + String(roll_averager.calc()));
+        Serial.println("\t\tl: " + String(convert_domain(lift_averager.calc() * 180, AngleDomain::continuous)) +
+                       "\tp: " + String(convert_domain(pitch_averager.calc() * 180, AngleDomain::continuous)) +
+                       "\tr: " + String(convert_domain(roll_averager.calc() * 180, AngleDomain::continuous)));
 
         /* controller trigger states */
         // Serial.println("triggers:\tL:" + String(trig_L) + "\tR: " + String(trig_R));
