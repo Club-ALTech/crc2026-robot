@@ -39,7 +39,7 @@ class ReadPWM
     uint8_t _pin, _mode;
 
 public:
-    ReadPWM(uint8_t pin, uint8_t mode = HIGH, uint32_t timeout = 1050)
+    ReadPWM(uint8_t pin, uint8_t mode = HIGH, uint32_t timeout = 2500)
         : _last(0), _timeout(timeout), _pin(pin), _mode(mode)
     {
         pinMode(pin, INPUT);
@@ -81,7 +81,7 @@ public:
         {
             raw_angle = angle<DOMAIN, UNIT>::max_a() - raw_angle;
         }
-        return angle<DOMAIN, UNIT>::from(raw_angle + this->_offset);
+        return angle<DOMAIN, UNIT>::from(raw_angle - this->_offset);
     }
 
     void set_offset(float offset)
@@ -210,12 +210,98 @@ struct JoystickPair
     Joystick left, right;
 };
 
+struct PIDK
+{
+    float p, i, d;
+};
+
+struct PID_ios
+{
+    float input, output, setpoint;
+};
+
+/**
+ * @param hz hertz
+ * @returns delay time (in millis)
+ */
+uint32_t hz(float hz)
+{
+    auto ONE_SECOND = 1000;
+    return ONE_SECOND / hz;
+}
+
+class Lift
+{
+    // TODO: actually, this is technically just another smarthinge, but the angle is represented as a distance instead.
+public:
+    Lift(QuickPID &pid, PID_ios ios, float cm_per_in) {}
+};
+
+/**
+ * we're working under the assumption that the bounds are within a single full circle.
+ */
+class SmartHinge
+{
+public:
+    constexpr static const auto D = domain::continuous;
+    constexpr static const auto U = unit::radians;
+    constexpr static const float SAFETY_BUFFER = angle<domain::continuous, unit::degrees>::from(5)
+                                                     .template translate<unit::radians>()
+                                                     .value;
+
+    QuickPID &_pid;
+    PID_ios _ios;
+    angle<D, U> _low_bound, _high_bound, _target;
+
+    SmartHinge(QuickPID &pid, PID_ios ios, angle<D, U> low_bound, angle<D, U> high_bound)
+        : _pid(pid),
+          _ios(ios),
+          _low_bound{.value = low_bound.value + SAFETY_BUFFER},
+          _high_bound{.value = high_bound.value - SAFETY_BUFFER},
+          _target{0}
+    {
+    }
+
+    /**
+     * @returns did update
+     */
+    bool update(angle<D, U> current)
+    {
+        this->_ios.setpoint = current.travel(_target).value;
+        return this->_pid.Compute();
+    }
+
+    void set_target(angle<D, U> target)
+    {
+        this->_target = target.normalize();
+        if (in_bounds(_low_bound.value, _high_bound.value, _target.value))
+            return;
+        if (abs(target.travel(_low_bound).value) < abs(target.travel(_high_bound).value))
+        {
+            this->_target = _low_bound;
+        }
+        else
+        {
+            this->_target = _high_bound;
+        }
+    }
+
+    bool in_bounds(float low, float high, float to_test)
+    {
+        auto virt_low = angle<D, U>::from(low + abs(low)).normalize();
+        auto virt_high = angle<D, U>::from(high + abs(low)).normalize();
+        auto virt_to_test = angle<D, U>::from(to_test + abs(low)).normalize();
+        return virt_low.value <= virt_to_test.value && virt_to_test.value <= virt_high.value;
+    }
+};
+
 /**
  * =============
  * CONFIGURATION
  * =============
  */
 
+/* pins */
 const pin_t WHEEL_FL_M_p = CRC_PWM_11;
 const pin_t WHEEL_FR_M_p = CRC_PWM_2;
 const pin_t WHEEL_BL_M_p = CRC_PWM_12;
@@ -236,14 +322,50 @@ const pin_t MANIP_BELT_B_p = CRC_PWM_5;
 
 const pin_t BEAM_p = CRC_DIG_1;
 
-const int PRINT_TIMER_DELAY = 1000 / 20; // 20Hz
+/* timings */
+const uint32_t PRINT_TIMER_DELAY = hz(20);
 
-const double FIELD_CENTRIC_P = 7;
-const double FIELD_CENTRIC_I = 0;
-const double FIELD_CENTRIC_D = 0.0011;
+/* PID configurations*/
+void CONFIG_FIELD_CENTRIC_PID(QuickPID &pid)
+{
+    pid.SetTunings(
+        7,
+        0,
+        0.0011);
+    pid.SetControllerDirection(QuickPID::Action::reverse);
+    pid.SetSampleTimeUs(hz(50));
+    pid.SetOutputLimits(-60, 60);
+}
 
-const double FIELD_CENTRIC_OUTPUT_LIM = 60;
-const double FIELD_CENTRIC_SAMPLE_FREQ_HZ = 50;
+void CONFIG_LIFT_PID(QuickPID &pid)
+{
+    pid.SetTunings(
+        1,
+        0,
+        0);
+    pid.SetSampleTimeUs(hz(50));
+}
+
+void CONFIG_ROLL_PID(QuickPID &pid)
+{
+    pid.SetTunings(
+        1,
+        0,
+        0);
+    pid.SetSampleTimeUs(hz(50));
+}
+
+void CONFIG_PITCH_PID(QuickPID &pid)
+{
+    pid.SetTunings(
+        1,
+        0,
+        0);
+    pid.SetSampleTimeUs(hz(50));
+}
+
+/* misc */
+const double LIFT_CM_PER_RAD = 1;
 
 /**
  * ========================
@@ -251,21 +373,34 @@ const double FIELD_CENTRIC_SAMPLE_FREQ_HZ = 50;
  * ========================
  */
 
-angle<domain::continuous, unit::degrees> field_centric_offset{0};
-
-Servo manip_belt_a, manip_belt_b;
-
-NavX navx;
-
 CrcLib::Timer print_timer, battery_low_timeout;
 
+/* lift and manipulator*/
+Servo manip_belt_a, manip_belt_b;
 ReadPWM lift_PWM(LIFT_E_p), pitch_PWM(MANIP_PITCH_E_p), roll_PWM(MANIP_ROLL_E_p);
-PwmToAngleConverter lift_converter, pitch_converter, roll_converter;
-angles::AngleMovingAvg lift_averager(0.2), pitch_averager(0.2), roll_averager(0.2);
+PwmToAngleConverter lift_converter(false, // TODO: do this one
+                                   angle<domain::continuous, unit::degrees>::from(0)
+                                       .template translate<unit::radians>()
+                                       .value),
+    pitch_converter(true,
+                    angle<domain::continuous, unit::degrees>::from(184.5) // 185-182
+                        .template translate<unit::radians>()
+                        .value), // range: 0-57deg
+    roll_converter(false,        // NOTE: for some reason, the real 90deg is read at 105deg
+                   angle<domain::continuous, unit::degrees>::from(306.5)
+                       .template translate<unit::radians>()
+                       .value); // range: ~-15-~206deg
+angles::AngleMovingAvg lift_averager(0.5), pitch_averager(0.5), roll_averager(0.5);
+PID_ios lift_ios{0}, pitch_ios{0}, roll_ios{0};
+QuickPID lift_pid(&lift_ios.input, &lift_ios.output, &lift_ios.setpoint);
+QuickPID pitch_pid(&pitch_ios.input, &pitch_ios.output, &pitch_ios.setpoint);
+QuickPID roll_pid(&pitch_ios.input, &pitch_ios.output, &pitch_ios.setpoint);
 
-float input, output, setpoint = 0;
-QuickPID pid(&input, &output, &setpoint,
-             FIELD_CENTRIC_P, FIELD_CENTRIC_I, FIELD_CENTRIC_D, QuickPID::Action::reverse);
+/* field centric */
+NavX navx;
+angle<domain::continuous, unit::degrees> field_centric_offset{0};
+PID_ios fc_ios{0}; // setpoint will always be 0;
+QuickPID field_centric_pid(&fc_ios.input, &fc_ios.output, &fc_ios.setpoint);
 
 /**
  * ============
@@ -293,14 +428,21 @@ void setup()
 
     pinMode(BEAM_p, INPUT);
 
-    // manip_belt_a.attach(MANIP_BELT_A_p);
-    // manip_belt_b.attach(MANIP_BELT_B_p);
+    manip_belt_a.attach(MANIP_BELT_A_p);
+    manip_belt_b.attach(MANIP_BELT_B_p);
+    manip_belt_a.write(1500);
+    manip_belt_b.write(1500);
 
     print_timer.Start(PRINT_TIMER_DELAY);
 
-    pid.SetMode(QuickPID::Control::automatic);
-    pid.SetSampleTimeUs(1000 / FIELD_CENTRIC_SAMPLE_FREQ_HZ);
-    pid.SetOutputLimits(-FIELD_CENTRIC_OUTPUT_LIM, FIELD_CENTRIC_OUTPUT_LIM);
+    CONFIG_FIELD_CENTRIC_PID(field_centric_pid);
+    field_centric_pid.SetMode(QuickPID::Control::automatic); // starts the PID
+    CONFIG_LIFT_PID(lift_pid);
+    lift_pid.SetMode(QuickPID::Control::automatic);
+    CONFIG_PITCH_PID(pitch_pid);
+    pitch_pid.SetMode(QuickPID::Control::automatic);
+    CONFIG_ROLL_PID(roll_pid);
+    roll_pid.SetMode(QuickPID::Control::automatic);
 }
 
 void soft_kill()
@@ -313,9 +455,9 @@ void soft_kill()
     CrcLib::SetPwmOutput(LIFT_R_M_p, 0);
     CrcLib::SetPwmOutput(MANIP_PITCH_M_p, 0);
     CrcLib::SetPwmOutput(MANIP_ROLL_M_p, 0);
-    // manip_belt_a.write(0);
-    // manip_belt_b.write(0);
-    pid.SetOutputSum(0);
+    manip_belt_a.write(1500);
+    manip_belt_b.write(1500);
+    field_centric_pid.SetOutputSum(0);
 }
 
 void loop()
@@ -362,8 +504,8 @@ void loop()
             .y = (float)CrcLib::ReadAnalogChannel(ANALOG::JOYSTICK2_Y),
         }};
 
-    int8_t trig_L = CrcLib::ReadAnalogChannel(ANALOG::GACHETTE_L);
-    int8_t trig_R = CrcLib::ReadAnalogChannel(ANALOG::GACHETTE_R);
+    int8_t trig_L = int(CrcLib::ReadAnalogChannel(ANALOG::GACHETTE_L)) + 128;
+    int8_t trig_R = int(CrcLib::ReadAnalogChannel(ANALOG::GACHETTE_R)) + 128;
 
     /**
      * ------------------
@@ -372,11 +514,11 @@ void loop()
      */
 
     uint32_t manip_pitch_signal;
-    pitch_PWM.read(manip_pitch_signal);
+    bool pitch_read = pitch_PWM.read(manip_pitch_signal);
     uint32_t manip_roll_signal;
-    roll_PWM.read(manip_roll_signal);
+    bool roll_read = roll_PWM.read(manip_roll_signal);
     uint32_t lift_height_signal;
-    lift_PWM.read(lift_height_signal);
+    bool lift_read = lift_PWM.read(lift_height_signal);
 
     bool beam_obstructed = CrcLib::GetDigitalInput(BEAM_p);
 
@@ -429,7 +571,7 @@ void loop()
         target_rotation = angle<domain::continuous, unit::degrees>::from(180 - (atan2(joysticks_clean.right.x, joysticks_clean.right.y) * 180 / PI));
     }
 
-    input = current_rotation.travel(target_rotation).value;
+    fc_ios.input = current_rotation.travel(target_rotation).value;
 
     /**
      * -----------------------
@@ -453,14 +595,14 @@ void loop()
         joysticks_clean.right.y *= REDUCTION;
     }
 
-    if (true && pid.Compute())
+    if (false && field_centric_pid.Compute())
     {
         /* FIELD CENTRIC HOLONOMIC */
         // Convert joystick inputs to field-centric
         NavX::FieldCentricInput robotCentric = NavX::convertToRobotCentric(
             joysticks_clean.left.y, // Forward
             joysticks_clean.left.x, // Strafe
-            output,                 // Rotation
+            fc_ios.output,          // Rotation
             -current_rotation.convert<angles::domain::mirror>().value);
 
         // Apply converted values to motors
@@ -485,13 +627,18 @@ void loop()
         CrcLib::SetPwmOutput(MANIP_ROLL_M_p, trig_R);
     }
 
-    if (true && CrcLib::ReadDigitalChannel(BUTTON::COLORS_RIGHT))
+    if (false && CrcLib::ReadDigitalChannel(BUTTON::COLORS_RIGHT))
     {
         /* BELTS */
-        auto speed_L = map(trig_L, -128, 127, 1000, 2000);
-        auto speed_R = map(trig_R, -128, 127, 1000, 2000);
-        // manip_belt_a.writeMicroseconds(speed_L);
-        // manip_belt_b.writeMicroseconds(speed_R);
+        auto speed_L = map(trig_L, 0, 255, 1000, 2000);
+        auto speed_R = map(trig_R, 0, 255, 1000, 2000);
+        manip_belt_a.writeMicroseconds(speed_L);
+        manip_belt_b.writeMicroseconds(speed_R);
+    }
+    else
+    {
+        manip_belt_a.writeMicroseconds(1500);
+        manip_belt_b.writeMicroseconds(1500);
     }
 
     if (CrcLib::ReadDigitalChannel(BUTTON::START))
@@ -524,17 +671,21 @@ void loop()
         /* reading encoders */
         if (true)
         {
-            Serial.print("l: " + String(lift_converter.convert(lift_height_signal).value) +
-                         "\tp: " + String(pitch_converter.convert(manip_pitch_signal).value) +
-                         "\tr: " + String(roll_converter.convert(manip_roll_signal).value));
-
-            Serial.println("\t\tl: " + String(lift_averager.calc().template convert<domain::continuous>().template translate<unit::degrees>().value) +
+            Serial.print("l: " + String(lift_read) +
+                         "\tp: " + String(pitch_read) +
+                         "\tr: " + String(roll_read));
+            Serial.print("\t|    ");
+            Serial.print("l: " + String(lift_converter.convert(lift_height_signal).template translate<unit::degrees>().value) +
+                         "\tp: " + String(pitch_converter.convert(manip_pitch_signal).template translate<unit::degrees>().value) +
+                         "\tr: " + String(roll_converter.convert(manip_roll_signal).template translate<unit::degrees>().value));
+            Serial.print("\t|    ");
+            Serial.println("l: " + String(lift_averager.calc().template convert<domain::continuous>().template translate<unit::degrees>().value) +
                            "\tp: " + String(pitch_averager.calc().template convert<domain::continuous>().template translate<unit::degrees>().value) +
                            "\tr: " + String(roll_averager.calc().template convert<domain::continuous>().template translate<unit::degrees>().value));
         }
 
         /* controller trigger states */
-        if (true)
+        if (false)
         {
             Serial.println("triggers:\tL:" + String(trig_L) + "\tR: " + String(trig_R));
         }
@@ -548,7 +699,13 @@ void loop()
         /* field centric PID info */
         if (false)
         {
-            Serial.println("input: " + String(input) + "\toutput: " + String(output));
+            Serial.println("input: " + String(fc_ios.input) + "\toutput: " + String(fc_ios.output));
+        }
+
+        /* orientation */
+        if (false)
+        {
+            Serial.println("current orientation: " + String(current_rotation.value));
         }
     }
 }
