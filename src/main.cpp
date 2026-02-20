@@ -109,13 +109,12 @@ public:
 
 class PwmToAngleConverter
 {
-    float _offset;
-    bool _reverse;
-    uint32_t _min_pulse, _max_pulse;
-
 public:
     static const angles::domain DOMAIN = angles::domain::continuous;
     static const angles::unit UNIT = angles::unit::radians;
+    float _offset;
+    bool _reverse;
+    uint32_t _min_pulse, _max_pulse;
 
     PwmToAngleConverter(bool reverse = false, float offset = 0, uint32_t min_pulse = 1, uint32_t max_pulse = 1024)
         : _offset(offset), _reverse(reverse), _min_pulse(min_pulse), _max_pulse(max_pulse) {}
@@ -135,23 +134,6 @@ public:
         this->_offset = offset;
     }
 };
-
-float travel_deg(float from, float to)
-{
-    auto zeroed = to - from;
-    if (zeroed > 180)
-    {
-        return zeroed - 360;
-    }
-    else if (zeroed < -180)
-    {
-        return zeroed + 360;
-    }
-    else
-    {
-        return zeroed;
-    }
-}
 
 int8_t clean_joystick_input(int8_t input)
 {
@@ -227,8 +209,8 @@ public:
         auto field_forward = constrain(forward * cos(angleRad) + strafe * sin(angleRad), -127, 128);
         auto field_strafe = constrain(-forward * sin(angleRad) + strafe * cos(angleRad), -127, 128);
 
-        return (FieldCentricInput){.forward = (int8_t) field_forward,
-                                   .strafe = (int8_t) field_strafe,
+        return (FieldCentricInput){.forward = (int8_t)field_forward,
+                                   .strafe = (int8_t)field_strafe,
                                    .rotation = rotation};
     }
 
@@ -287,7 +269,7 @@ const float SAFETY_DEGREES_BUFFER = angle<domain::continuous, unit::degrees>::fr
                                         .template translate<unit::radians>()
                                         .value;
 /**
- * we're working under the assumption that the bounds are within a single full circle.
+ * we're working under the assumption that the bounds are within a single full continuous circle.
  */
 class SmartHinge
 {
@@ -296,10 +278,10 @@ public:
     constexpr static const auto U = unit::radians;
 
     QuickPID &_pid;
-    PID_ios _ios;
+    PID_ios &_ios;
     angle<D, U> _low_bound, _high_bound, _target;
 
-    SmartHinge(QuickPID &pid, PID_ios ios, angle<D, U> low_bound, angle<D, U> high_bound)
+    SmartHinge(QuickPID &pid, PID_ios &ios, const angle<D, U> low_bound, const angle<D, U> high_bound)
         : _pid(pid),
           _ios(ios),
           _low_bound{.value = low_bound.value + SAFETY_DEGREES_BUFFER},
@@ -412,6 +394,7 @@ void CONFIG_PITCH_PID(QuickPID &pid)
 
 /* misc */
 const double LIFT_CM_PER_RAD = 1;
+const float PRECISION_MODE_REDUCTION = 0.3;
 
 /**
  * ========================
@@ -423,11 +406,14 @@ CrcLib::Timer print_timer, battery_low_timeout;
 
 /* lift and manipulator*/
 Servo manip_belt_a, manip_belt_b;
-ReadPWM lift_PWM(LIFT_E_p), pitch_PWM(MANIP_PITCH_E_p), roll_PWM(MANIP_ROLL_E_p);
-PwmToAngleConverter lift_converter(false, // TODO: do this one
-                                   angle<domain::continuous, unit::degrees>::from(0)
-                                       .template translate<unit::radians>()
-                                       .value),
+ReadPWM lift_PWM(LIFT_E_p),
+    pitch_PWM(MANIP_PITCH_E_p),
+    roll_PWM(MANIP_ROLL_E_p);
+PwmToAngleConverter
+    lift_converter(false, // TODO: do this one
+                   angle<domain::continuous, unit::degrees>::from(0)
+                       .template translate<unit::radians>()
+                       .value),
     pitch_converter(true,
                     angle<domain::continuous, unit::degrees>::from(184.5) // 185-182
                         .template translate<unit::radians>()
@@ -441,6 +427,17 @@ PID_ios lift_ios{0}, pitch_ios{0}, roll_ios{0};
 QuickPID lift_pid(&lift_ios.input, &lift_ios.output, &lift_ios.setpoint);
 QuickPID pitch_pid(&pitch_ios.input, &pitch_ios.output, &pitch_ios.setpoint);
 QuickPID roll_pid(&pitch_ios.input, &pitch_ios.output, &pitch_ios.setpoint);
+
+SmartHinge pitch_hinge(
+    pitch_pid,
+    pitch_ios,
+    angle<domain::continuous, unit::radians>::from(0),
+    angle<domain::continuous, unit::radians>::from(0));
+SmartHinge roll_hinge(
+    roll_pid,
+    roll_ios,
+    angle<domain::continuous, unit::radians>::from(0),
+    angle<domain::continuous, unit::radians>::from(0));
 
 /* field centric */
 NavX navx;
@@ -467,6 +464,9 @@ void soft_kill()
     manip_belt_a.write(1500);
     manip_belt_b.write(1500);
     field_centric_pid.SetOutputSum(0);
+    roll_pid.SetOutputSum(0);
+    pitch_pid.SetOutputSum(0);
+    lift_pid.SetOutputSum(0);
 }
 
 void setup()
@@ -588,10 +588,13 @@ void loop()
 
     lift_averager.add(lift_converter.convert(lift_height_signal)
                           .template convert<domain::mirror>());
+
     pitch_averager.add(pitch_converter.convert(manip_pitch_signal)
                            .template convert<domain::mirror>());
     roll_averager.add(roll_converter.convert(manip_roll_signal)
                           .template convert<domain::mirror>());
+    roll_hinge.update(roll_averager.calc()
+                          .template convert<domain::continuous>());
 
     float robot_rotation = NavX::stupid_fix(h.yaw);
 
@@ -634,16 +637,15 @@ void loop()
     if (true && CrcLib::ReadDigitalChannel(BUTTON::COLORS_DOWN))
     {
         /* PRECISION MODE */
-        const float REDUCTION = 0.3;
-        joysticks_clean.left.x *= REDUCTION;
-        joysticks_clean.left.y *= REDUCTION;
-        joysticks_clean.right.x *= REDUCTION;
-        joysticks_clean.right.y *= REDUCTION;
+        joysticks_clean.left.x *= PRECISION_MODE_REDUCTION;
+        joysticks_clean.left.y *= PRECISION_MODE_REDUCTION;
+        joysticks_clean.right.x *= PRECISION_MODE_REDUCTION;
+        joysticks_clean.right.y *= PRECISION_MODE_REDUCTION;
     }
 
     if (false && field_centric_pid.Compute())
     {
-        /* FIELD CENTRIC HOLONOMIC */
+        /* PID-DRIVEN FIELD CENTRIC HOLONOMIC */
         // Convert joystick inputs to field-centric
         NavX::FieldCentricInput robotCentric = NavX::convertToRobotCentric(
             joysticks_clean.left.y, // Forward
@@ -661,21 +663,29 @@ void loop()
 
     if (false && CrcLib::ReadDigitalChannel(BUTTON::COLORS_UP))
     {
-        /* LIFT */
-        CrcLib::SetPwmOutput(LIFT_L_M_p, trig_L);
-        CrcLib::SetPwmOutput(LIFT_R_M_p, trig_R);
+        /* PID-DRIVEN LIFT */
+        // TODO
+        // CrcLib::SetPwmOutput(LIFT_L_M_p, trig_L);
+        // CrcLib::SetPwmOutput(LIFT_R_M_p, trig_R);
     }
 
-    if (false && CrcLib::ReadDigitalChannel(BUTTON::COLORS_LEFT))
+    if (false && pitch_hinge.update(pitch_averager.calc()
+                                        .template convert<domain::continuous>()))
     {
-        /* MANIPULATOR PITCH/ROLL */
-        CrcLib::SetPwmOutput(MANIP_PITCH_M_p, trig_L);
-        CrcLib::SetPwmOutput(MANIP_ROLL_M_p, trig_R);
-    }
+        /* PID-DRIVEN MANIPULATOR PITCH */
+        CrcLib::SetPwmOutput(MANIP_PITCH_M_p, pitch_ios.output);
+    };
+
+    if (false && roll_hinge.update(roll_averager.calc()
+                                       .template convert<domain::continuous>()))
+    {
+        /* PID-DRIVEN MANIPULATOR ROLL */
+        CrcLib::SetPwmOutput(MANIP_PITCH_M_p, pitch_ios.output);
+    };
 
     if (false && CrcLib::ReadDigitalChannel(BUTTON::COLORS_RIGHT))
     {
-        /* BELTS */
+        /* MANIPULATOR BELTS */
         auto speed_L = map(trig_L, 0, 255, 1000, 2000);
         auto speed_R = map(trig_R, 0, 255, 1000, 2000);
         manip_belt_a.writeMicroseconds(speed_L);
