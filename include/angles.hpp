@@ -112,7 +112,11 @@ namespace angles
         {
             if constexpr (D == domain::continuous)
             {
-                auto value = fmod(this->value, angle<domain::continuous, U>::max_a());
+                auto max = angle<domain::continuous, U>::max_a();
+                auto numtimes = this->value/max;
+                auto moded = this->value - (floor(numtimes) * max);
+                auto value = moded;
+
                 if (value < 0)
                     value += angle<domain::continuous, U>::max_a();
                 return {value};
