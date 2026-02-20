@@ -395,6 +395,9 @@ void CONFIG_PITCH_PID(QuickPID &pid)
 /* misc */
 const double LIFT_CM_PER_RAD = 1;
 const float PRECISION_MODE_REDUCTION = 0.3;
+const float LIFT_ENCO_SMOOTHING = 0.1,
+            PITCH_ENCO_SMOOTHING = 0.1,
+            ROLL_ENCO_SMOOTHING = 0.1;
 
 /**
  * ========================
@@ -422,7 +425,7 @@ PwmToAngleConverter
                    angle<domain::continuous, unit::degrees>::from(306.5)
                        .template translate<unit::radians>()
                        .value); // range: ~-15-~206deg
-angles::AngleMovingAvg lift_averager(0.5), pitch_averager(0.5), roll_averager(0.5);
+angles::AngleMovingAvg lift_averager(LIFT_ENCO_SMOOTHING), pitch_averager(PITCH_ENCO_SMOOTHING), roll_averager(ROLL_ENCO_SMOOTHING);
 PID_ios lift_ios{0}, pitch_ios{0}, roll_ios{0};
 QuickPID lift_pid(&lift_ios.input, &lift_ios.output, &lift_ios.setpoint);
 QuickPID pitch_pid(&pitch_ios.input, &pitch_ios.output, &pitch_ios.setpoint);
