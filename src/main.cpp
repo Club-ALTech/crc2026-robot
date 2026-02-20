@@ -1,3 +1,49 @@
+/**
+ * INFO: the interesting sections for users looking to customize the behavior of the robot (NON
+ * contributors) are the following
+ * - 2 CONFIGURATIONS
+ * - 4.1 GUARDS
+ * - 4.6 FEATURES
+ * - 4.7 SERIAL REPORTING
+ *
+ * INDEX:
+ *  1. TOOLS & UTILS
+ *      > Local utilies and general implementations details.
+ *  2. CONFIGURATIONS
+ *      > Constants used to fine tune the behaviors. Pins, pid configurations, etc.
+ *  3. WORKERS
+ *      > Specific implementation details.
+ *  4. MAIN
+ *      > Program lifecycle (setup and loop) and lifecycle-related utilities (such as soft_kill).
+ *      > A lot of the following sections contain togglable behaviors. To enable or disable these
+ *      > behaviors, change the value of the first hard cooded boolean in the if statements that
+ *      > encompass them. Ex:
+ *      > ```cpp
+ *      > if (true && <some other conditions>)
+ *      > {
+ *      >    // NAME: (FEATURE NAME OR DESCRIPTION)
+ *      >   // the feature is enabled.
+ *      > }
+ *      > ```
+ *      1. GUARDS
+ *          > Safeties that prevent further execution in case some basic assertions are not met.
+ *          > contains TOGGLEABLE BEHAVIOURS.
+ *      2. CONTROLLER INPUT
+ *          > Aquisition of controller state.
+ *      3. SENSOR AQUISITIONS
+ *          > Aquisition of sensor datas.
+ *      4. DATA PROCESSING
+ *          > Refinements to the aquisitions made above.
+ *      5. PID SHENANIGANS
+ *          > calculation of PID input values.
+ *          > TODO: pid shenanigans should go in their appropriate features instead of here.
+ *      6. FEATURES
+ *          > Every feature of the robot (reactions to inputs and sensors).
+ *          > contains TOGGLEABLE BEHAVIOURS.
+ *      7. SERIAL REPORTING
+ *          > contains TOGGLEABLE BEHAVIOURS.
+ */
+
 #include <Arduino.h>
 #include <CrcLib.h>
 #include <Wire.h>
@@ -181,8 +227,8 @@ public:
         auto field_forward = constrain(forward * cos(angleRad) + strafe * sin(angleRad), -127, 128);
         auto field_strafe = constrain(-forward * sin(angleRad) + strafe * cos(angleRad), -127, 128);
 
-        return (FieldCentricInput){.forward = field_forward,
-                                   .strafe = field_strafe,
+        return (FieldCentricInput){.forward = (int8_t) field_forward,
+                                   .strafe = (int8_t) field_strafe,
                                    .rotation = rotation};
     }
 
@@ -237,6 +283,9 @@ public:
     Lift(QuickPID &pid, PID_ios ios, float cm_per_in) {}
 };
 
+const float SAFETY_DEGREES_BUFFER = angle<domain::continuous, unit::degrees>::from(5)
+                                        .template translate<unit::radians>()
+                                        .value;
 /**
  * we're working under the assumption that the bounds are within a single full circle.
  */
@@ -245,9 +294,6 @@ class SmartHinge
 public:
     constexpr static const auto D = domain::continuous;
     constexpr static const auto U = unit::radians;
-    constexpr static const float SAFETY_BUFFER = angle<domain::continuous, unit::degrees>::from(5)
-                                                     .template translate<unit::radians>()
-                                                     .value;
 
     QuickPID &_pid;
     PID_ios _ios;
@@ -256,8 +302,8 @@ public:
     SmartHinge(QuickPID &pid, PID_ios ios, angle<D, U> low_bound, angle<D, U> high_bound)
         : _pid(pid),
           _ios(ios),
-          _low_bound{.value = low_bound.value + SAFETY_BUFFER},
-          _high_bound{.value = high_bound.value - SAFETY_BUFFER},
+          _low_bound{.value = low_bound.value + SAFETY_DEGREES_BUFFER},
+          _high_bound{.value = high_bound.value - SAFETY_DEGREES_BUFFER},
           _target{0}
     {
     }
@@ -403,10 +449,25 @@ PID_ios fc_ios{0}; // setpoint will always be 0;
 QuickPID field_centric_pid(&fc_ios.input, &fc_ios.output, &fc_ios.setpoint);
 
 /**
- * ============
- * SETUP & LOOP
- * ============
+ * ====
+ * MAIN
+ * ====
  */
+
+void soft_kill()
+{
+    CrcLib::SetPwmOutput(WHEEL_BL_M_p, 0);
+    CrcLib::SetPwmOutput(WHEEL_BR_M_p, 0);
+    CrcLib::SetPwmOutput(WHEEL_FL_M_p, 0);
+    CrcLib::SetPwmOutput(WHEEL_FR_M_p, 0);
+    CrcLib::SetPwmOutput(LIFT_L_M_p, 0);
+    CrcLib::SetPwmOutput(LIFT_R_M_p, 0);
+    CrcLib::SetPwmOutput(MANIP_PITCH_M_p, 0);
+    CrcLib::SetPwmOutput(MANIP_ROLL_M_p, 0);
+    manip_belt_a.write(1500);
+    manip_belt_b.write(1500);
+    field_centric_pid.SetOutputSum(0);
+}
 
 void setup()
 {
@@ -443,21 +504,6 @@ void setup()
     pitch_pid.SetMode(QuickPID::Control::automatic);
     CONFIG_ROLL_PID(roll_pid);
     roll_pid.SetMode(QuickPID::Control::automatic);
-}
-
-void soft_kill()
-{
-    CrcLib::SetPwmOutput(WHEEL_BL_M_p, 0);
-    CrcLib::SetPwmOutput(WHEEL_BR_M_p, 0);
-    CrcLib::SetPwmOutput(WHEEL_FL_M_p, 0);
-    CrcLib::SetPwmOutput(WHEEL_FR_M_p, 0);
-    CrcLib::SetPwmOutput(LIFT_L_M_p, 0);
-    CrcLib::SetPwmOutput(LIFT_R_M_p, 0);
-    CrcLib::SetPwmOutput(MANIP_PITCH_M_p, 0);
-    CrcLib::SetPwmOutput(MANIP_ROLL_M_p, 0);
-    manip_belt_a.write(1500);
-    manip_belt_b.write(1500);
-    field_centric_pid.SetOutputSum(0);
 }
 
 void loop()
@@ -574,9 +620,9 @@ void loop()
     fc_ios.input = current_rotation.travel(target_rotation).value;
 
     /**
-     * -----------------------
-     * MOTOR OUTPUTS, CONTROLS
-     * -----------------------
+     * --------
+     * FEATURES
+     * --------
      */
 
     if (CrcLib::ReadDigitalChannel(BUTTON::SELECT))
