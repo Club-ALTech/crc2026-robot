@@ -53,6 +53,7 @@
 #include "AHRSProtocol.h"
 #include <QuickPID.h>
 #include <angles.hpp> // angles
+#include <Decodeur.h>
 
 using namespace angles;
 
@@ -387,12 +388,12 @@ void CONFIG_FIELD_CENTRIC_PID(QuickPID &pid)
 void CONFIG_LIFT_PID(QuickPID &pid)
 {
     pid.SetTunings(
-        120,
-        0.1,
+        20,
+        0,
         0);
     pid.SetSampleTimeUs(hz(50));
     pid.SetControllerDirection(QuickPID::Action::direct);
-    pid.SetOutputLimits(-120, 120);
+    pid.SetOutputLimits(-30, 30);
 }
 
 void CONFIG_ROLL_PID(QuickPID &pid)
@@ -429,6 +430,7 @@ const float LIFT_ENCO_SMOOTHING = 0.1,
  * ========================
  */
 
+Decodeur dec(&Serial);
 CrcLib::Timer print_timer, battery_low_timeout, controller_poll_timer;
 
 /* lift and manipulator*/
@@ -542,6 +544,7 @@ void setup()
 void loop()
 {
     CrcLib::Update();
+    dec.refresh();
 
     /**
      * ------
@@ -647,50 +650,73 @@ void loop()
         }
     }
 
-    if (controller_poll_timer.IsFinished())
+    if (dec.isAvailable())
     {
-        controller_poll_timer.Start(CONTROLLER_POLL_DELAY);
+        auto target = dec.getArg(0);
+        auto a = angle<domain::continuous, unit::degrees>::from(target)
+                     .template translate<unit::radians>();
+        switch (dec.getCommand())
         {
-            /* LIFT */
-            const float lift_speed = M_PI / 10;           // set value in rads
-            auto current_lift_angle = lift_hinge._target; //  lift_averager.calc();
-            if (trig_R)
-            {
-                auto val = current_lift_angle.value + lift_speed;
-                val = val > angle<domain::continuous, unit::radians>::max_a() ? angle<domain::continuous, unit::radians>::max_a() : val;
-                lift_hinge.set_target(angle<domain::continuous, unit::radians>::from(val));
-            }
-            else if (trig_L)
-            {
-                auto val = current_lift_angle.value - lift_speed;
-                val = val < angle<domain::continuous, unit::radians>::min_a() ? angle<domain::continuous, unit::radians>::min_a() : val;
-                lift_hinge.set_target(angle<domain::continuous, unit::radians>::from(val));
-            }
-        }
-        {
-            /* PITCH */
-            auto current = pitch_averager.calc().template convert<domain::continuous>();
-            auto speed = M_PI/10; // 0.1pi/sec
-            if (CrcLib::ReadDigitalChannel(BUTTON::ARROW_UP))
-            {
-                float v = current.value + speed;
-                if (v > angle<domain::continuous, unit::radians>::max_a())
-                {
-                    v = angle<domain::continuous, unit::radians>::max_a();
-                }
-                pitch_hinge.set_target({v});
-            }
-            if (CrcLib::ReadDigitalChannel(BUTTON::ARROW_DOWN))
-            {
-                float v = current.value - speed;
-                if (v < angle<domain::continuous, unit::radians>::min_a())
-                {
-                    v = angle<domain::continuous, unit::radians>::min_a();
-                }
-                pitch_hinge.set_target({v});
-            }
+        case 'L':
+            Serial.println("setting LIFT target to " + String(a.value));
+            lift_hinge.set_target(a);
+            break;
+        case 'P':
+            Serial.println("setting PITCH target to " + String(a.value));
+            pitch_hinge.set_target(a);
+            break;
+        case 'R':
+            Serial.println("setting ROLL target to " + String(a.value));
+            roll_hinge.set_target(a);
+            break;
         }
     }
+
+    // TODO: come back to this and impl properly?
+    // if (controller_poll_timer.IsFinished())
+    // {
+    //     controller_poll_timer.Start(CONTROLLER_POLL_DELAY);
+    //     {
+    //         /* LIFT */
+    //         const float lift_speed = M_PI / 10;           // set value in rads
+    //         auto current_lift_angle = lift_hinge._target; //  lift_averager.calc();
+    //         if (trig_R)
+    //         {
+    //             auto val = current_lift_angle.value + lift_speed;
+    //             val = val > angle<domain::continuous, unit::radians>::max_a() ? angle<domain::continuous, unit::radians>::max_a() : val;
+    //             lift_hinge.set_target(angle<domain::continuous, unit::radians>::from(val));
+    //         }
+    //         else if (trig_L)
+    //         {
+    //             auto val = current_lift_angle.value - lift_speed;
+    //             val = val < angle<domain::continuous, unit::radians>::min_a() ? angle<domain::continuous, unit::radians>::min_a() : val;
+    //             lift_hinge.set_target(angle<domain::continuous, unit::radians>::from(val));
+    //         }
+    //     }
+    //     {
+    //         /* PITCH */
+    //         auto current = pitch_averager.calc().template convert<domain::continuous>();
+    //         auto speed = M_PI/10; // 0.1pi/sec
+    //         if (CrcLib::ReadDigitalChannel(BUTTON::ARROW_UP))
+    //         {
+    //             float v = current.value + speed;
+    //             if (v > angle<domain::continuous, unit::radians>::max_a())
+    //             {
+    //                 v = angle<domain::continuous, unit::radians>::max_a();
+    //             }
+    //             pitch_hinge.set_target({v});
+    //         }
+    //         if (CrcLib::ReadDigitalChannel(BUTTON::ARROW_DOWN))
+    //         {
+    //             float v = current.value - speed;
+    //             if (v < angle<domain::continuous, unit::radians>::min_a())
+    //             {
+    //                 v = angle<domain::continuous, unit::radians>::min_a();
+    //             }
+    //             pitch_hinge.set_target({v});
+    //         }
+    //     }
+    // }
 
     /**
      * --------
