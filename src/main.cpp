@@ -320,7 +320,7 @@ public:
 
     void set_target(angle<D, U> target)
     {
-        this->_target = target.normalize();
+        this->_target = target;
         if (in_bounds(_low_bound.value, _high_bound.value, this->_target.value))
             return;
         if (abs(this->_target.travel(_low_bound).value) < abs(this->_target.travel(_high_bound).value))
@@ -335,10 +335,21 @@ public:
 
     bool in_bounds(float low, float high, float to_test)
     {
-        auto virt_low = angle<D, U>::from(low + abs(low)).normalize();
-        auto virt_high = angle<D, U>::from(high + abs(low)).normalize();
-        auto virt_to_test = angle<D, U>::from(to_test + abs(low)).normalize();
-        return virt_low.value <= virt_to_test.value && virt_to_test.value <= virt_high.value;
+        // if (low > high)
+        // {
+        //     low *= -1;
+        //     high *= -1;
+        //     to_test *= -1;
+
+        //     to_test = constrain(to_test, high, low);
+        //     return to_test * -1;
+        // }
+        // return constrain(to_test, low, high);
+        // auto virt_low = angle<D, U>::from(low + abs(low)).normalize();
+        // auto virt_high = angle<D, U>::from(high + abs(low)).normalize();
+        // auto virt_to_test = angle<D, U>::from(to_test + abs(low)).normalize();
+        // return virt_low.value <= virt_to_test.value && virt_to_test.value <= virt_high.value;
+        return low <= to_test && to_test <= high;
     }
 };
 
@@ -388,28 +399,28 @@ void CONFIG_FIELD_CENTRIC_PID(QuickPID &pid)
 void CONFIG_LIFT_PID(QuickPID &pid)
 {
     pid.SetTunings(
-        20,
+        200,
         0,
         0);
     pid.SetSampleTimeUs(hz(50));
     pid.SetControllerDirection(QuickPID::Action::direct);
-    pid.SetOutputLimits(-30, 30);
+    pid.SetOutputLimits(-100, 60);
 }
 
 void CONFIG_ROLL_PID(QuickPID &pid)
 {
     pid.SetTunings(
-        1,
+        120,
         0,
         0);
     pid.SetSampleTimeUs(hz(50));
-    pid.SetOutputLimits(-20, 20);
+    pid.SetOutputLimits(-30, 30);
 }
 
 void CONFIG_PITCH_PID(QuickPID &pid)
 {
     pid.SetTunings(
-        40,
+        300,
         0,
         0);
     pid.SetSampleTimeUs(hz(50));
@@ -439,8 +450,8 @@ ReadPWM lift_PWM(LIFT_E_p),
     pitch_PWM(MANIP_PITCH_E_p),
     roll_PWM(MANIP_ROLL_E_p);
 PwmToAngleConverter
-    lift_converter(true,                                               // GUILLAUME: premier param c'est si il est inversé ou pas
-                   angle<domain::continuous, unit::degrees>::from(100) // GUILLAUME: changer le truc dans les parentheses du from pour set un offset du 0
+    lift_converter(true,                                              // GUILLAUME: premier param c'est si il est inversé ou pas
+                   angle<domain::continuous, unit::degrees>::from(85) // GUILLAUME: changer le truc dans les parentheses du from pour set un offset du 0
                        .template translate<unit::radians>()
                        .value),
     pitch_converter(true,
@@ -455,7 +466,7 @@ angles::AngleMovingAvg lift_averager(LIFT_ENCO_SMOOTHING), pitch_averager(PITCH_
 PID_ios lift_ios{0}, pitch_ios{0}, roll_ios{0};
 QuickPID lift_pid(&lift_ios.input, &lift_ios.output, &lift_ios.setpoint);
 QuickPID pitch_pid(&pitch_ios.input, &pitch_ios.output, &pitch_ios.setpoint);
-QuickPID roll_pid(&pitch_ios.input, &pitch_ios.output, &pitch_ios.setpoint);
+QuickPID roll_pid(&roll_ios.input, &roll_ios.output, &roll_ios.setpoint);
 
 SmartHinge pitch_hinge(
     pitch_pid,
@@ -465,13 +476,13 @@ SmartHinge pitch_hinge(
 SmartHinge roll_hinge(
     roll_pid,
     roll_ios,
-    angle<domain::continuous, unit::radians>::from(0),  // GUILLAUME: hard stop LOW bound    ******************************************
-    angle<domain::continuous, unit::radians>::from(0)); // GUILLAUME: hard stop HIGH bound   ******************************************
+    angle<domain::continuous, unit::radians>::from(0),   // GUILLAUME: hard stop LOW bound    ******************************************
+    angle<domain::continuous, unit::radians>::from(90)); // GUILLAUME: hard stop HIGH bound   ******************************************
 SmartHinge lift_hinge(
     lift_pid,
     lift_ios,
     angle<domain::continuous, unit::degrees>::from(5).template translate<unit::radians>(),    // GUILLAUME: hard stop LOW bound   ******************************************
-    angle<domain::continuous, unit::degrees>::from(220).template translate<unit::radians>()); // real max is 320, but we're limiting it to that for now
+    angle<domain::continuous, unit::degrees>::from(320).template translate<unit::radians>()); // real max is 320, but we're limiting it to that for now
 
 /* field centric */
 NavX navx;
@@ -673,50 +684,67 @@ void loop()
     }
 
     // TODO: come back to this and impl properly?
-    // if (controller_poll_timer.IsFinished())
-    // {
-    //     controller_poll_timer.Start(CONTROLLER_POLL_DELAY);
-    //     {
-    //         /* LIFT */
-    //         const float lift_speed = M_PI / 10;           // set value in rads
-    //         auto current_lift_angle = lift_hinge._target; //  lift_averager.calc();
-    //         if (trig_R)
-    //         {
-    //             auto val = current_lift_angle.value + lift_speed;
-    //             val = val > angle<domain::continuous, unit::radians>::max_a() ? angle<domain::continuous, unit::radians>::max_a() : val;
-    //             lift_hinge.set_target(angle<domain::continuous, unit::radians>::from(val));
-    //         }
-    //         else if (trig_L)
-    //         {
-    //             auto val = current_lift_angle.value - lift_speed;
-    //             val = val < angle<domain::continuous, unit::radians>::min_a() ? angle<domain::continuous, unit::radians>::min_a() : val;
-    //             lift_hinge.set_target(angle<domain::continuous, unit::radians>::from(val));
-    //         }
-    //     }
-    //     {
-    //         /* PITCH */
-    //         auto current = pitch_averager.calc().template convert<domain::continuous>();
-    //         auto speed = M_PI/10; // 0.1pi/sec
-    //         if (CrcLib::ReadDigitalChannel(BUTTON::ARROW_UP))
-    //         {
-    //             float v = current.value + speed;
-    //             if (v > angle<domain::continuous, unit::radians>::max_a())
-    //             {
-    //                 v = angle<domain::continuous, unit::radians>::max_a();
-    //             }
-    //             pitch_hinge.set_target({v});
-    //         }
-    //         if (CrcLib::ReadDigitalChannel(BUTTON::ARROW_DOWN))
-    //         {
-    //             float v = current.value - speed;
-    //             if (v < angle<domain::continuous, unit::radians>::min_a())
-    //             {
-    //                 v = angle<domain::continuous, unit::radians>::min_a();
-    //             }
-    //             pitch_hinge.set_target({v});
-    //         }
-    //     }
-    // }
+    if (controller_poll_timer.IsFinished())
+    {
+        controller_poll_timer.Start(CONTROLLER_POLL_DELAY);
+        {
+            /* LIFT */
+            const float lift_speed = M_PI / 10;           // set value in rads
+            auto current_lift_angle = lift_hinge._target; //  lift_averager.calc();
+            if (trig_R)
+            {
+                auto val = current_lift_angle.value + lift_speed;
+                val = val > angle<domain::continuous, unit::radians>::max_a() ? angle<domain::continuous, unit::radians>::max_a() : val;
+                lift_hinge.set_target(angle<domain::continuous, unit::radians>::from(val));
+            }
+            else if (trig_L)
+            {
+                auto val = current_lift_angle.value - lift_speed;
+                val = val < angle<domain::continuous, unit::radians>::min_a() ? angle<domain::continuous, unit::radians>::min_a() : val;
+                lift_hinge.set_target(angle<domain::continuous, unit::radians>::from(val));
+            }
+            else
+            {
+                lift_hinge.set_target(lift_averager.calc().template convert<domain::continuous>());
+            }
+        }
+
+        {
+            if (CrcLib::ReadDigitalChannel(BUTTON::COLORS_UP))
+            {
+                roll_hinge.set_target(angle<domain::continuous, unit::degrees>::from(0)
+                                          .template translate<unit::radians>());
+            }
+            else if (CrcLib::ReadDigitalChannel(BUTTON::COLORS_DOWN))
+            {
+                roll_hinge.set_target(angle<domain::continuous, unit::degrees>::from(90)
+                                          .template translate<unit::radians>());
+            }
+        }
+        //     {
+        //         /* PITCH */
+        //         auto current = pitch_averager.calc().template convert<domain::continuous>();
+        //         auto speed = M_PI/10; // 0.1pi/sec
+        //         if (CrcLib::ReadDigitalChannel(BUTTON::ARROW_UP))
+        //         {
+        //             float v = current.value + speed;
+        //             if (v > angle<domain::continuous, unit::radians>::max_a())
+        //             {
+        //                 v = angle<domain::continuous, unit::radians>::max_a();
+        //             }
+        //             pitch_hinge.set_target({v});
+        //         }
+        //         if (CrcLib::ReadDigitalChannel(BUTTON::ARROW_DOWN))
+        //         {
+        //             float v = current.value - speed;
+        //             if (v < angle<domain::continuous, unit::radians>::min_a())
+        //             {
+        //                 v = angle<domain::continuous, unit::radians>::min_a();
+        //             }
+        //             pitch_hinge.set_target({v});
+        //         }
+        //     }
+    }
 
     /**
      * --------
@@ -739,15 +767,17 @@ void loop()
         joysticks_clean.right.y *= PRECISION_MODE_REDUCTION;
     }
 
-    if (false && field_centric.update(current_rotation))
+    if (true && field_centric.update(current_rotation))
     {
         /* PID-DRIVEN FIELD CENTRIC HOLONOMIC */
         // Convert joystick inputs to field-centric
         NavX::FieldCentricInput robotCentric = NavX::convertToRobotCentric(
             joysticks_clean.left.y, // Forward
             joysticks_clean.left.x, // Strafe
-            fc_ios.output,          // Rotation
-            -current_rotation.convert<angles::domain::mirror>().value);
+            joysticks_clean.right.x * 0.8,
+            0);
+        // fc_ios.output,          // Rotation
+        // -current_rotation.convert<angles::domain::mirror>().value);
 
         // Apply converted values to motors
         CrcLib::MoveHolonomic(
@@ -776,21 +806,28 @@ void loop()
                                        .template convert<domain::continuous>()))
     {
         /* PID-DRIVEN MANIPULATOR ROLL */
-        CrcLib::SetPwmOutput(MANIP_PITCH_M_p, pitch_ios.output);
+        CrcLib::SetPwmOutput(MANIP_PITCH_M_p, roll_ios.output);
     };
 
-    if (false && CrcLib::ReadDigitalChannel(BUTTON::COLORS_RIGHT))
+    if (true)
     {
+
         /* MANIPULATOR BELTS */
-        auto speed_L = map(trig_L, 0, 255, 1000, 2000);
-        auto speed_R = map(trig_R, 0, 255, 1000, 2000);
-        manip_belt_a.writeMicroseconds(speed_L);
-        manip_belt_b.writeMicroseconds(speed_R);
-    }
-    else
-    {
-        manip_belt_a.writeMicroseconds(1500);
-        manip_belt_b.writeMicroseconds(1500);
+        if (CrcLib::ReadDigitalChannel(BUTTON::R1))
+        {
+            manip_belt_a.writeMicroseconds(2000);
+            manip_belt_b.writeMicroseconds(2000);
+        }
+        else if (CrcLib::ReadDigitalChannel(BUTTON::L1))
+        {
+            manip_belt_a.writeMicroseconds(1000);
+            manip_belt_b.writeMicroseconds(1000);
+        }
+        else
+        {
+            manip_belt_a.writeMicroseconds(1500);
+            manip_belt_b.writeMicroseconds(1500);
+        }
     }
 
     if (CrcLib::ReadDigitalChannel(BUTTON::START))
@@ -821,7 +858,7 @@ void loop()
         }
 
         /* reading encoders */
-        if (true)
+        if (false)
         {
             Serial.print("l: " + String(lift_read) +
                          "\tp: " + String(pitch_read) +
@@ -843,13 +880,13 @@ void loop()
         }
 
         /* cmp expected rotation with curent rotation*/
-        if (false)
+        if (true)
         {
-            Serial.println("expected: " + String(field_centric._target.value) + "\tactual: " + String(current_rotation.value));
+            Serial.println("expected: " + String(field_centric._target.value) + "\tactualy: " + String(h.yaw)); // String(current_rotation.value));
         }
 
         /* field centric PID info */
-        if (false)
+        if (true)
         {
             Serial.println("input: " + String(fc_ios.input) + "\toutput: " + String(fc_ios.output));
         }
@@ -857,13 +894,22 @@ void loop()
         /* lift PID info */
         if (true)
         {
-            Serial.println("input: " + String(lift_ios.input) + "\toutput: " + String(lift_ios.output) + "\ttarget: " + String(lift_hinge._target.template translate<unit::degrees>().value));
+            Serial.println("LIFT input: " + String(lift_ios.input) + "\toutput: " + String(lift_ios.output) + "\ttarget: " + String(lift_hinge._target.template translate<unit::degrees>().value) +
+                           "\tl: " + String(lift_averager.calc().template convert<domain::continuous>().template translate<unit::degrees>().value));
         }
 
         /* pitch PID info */
         if (false)
         {
-            Serial.println("input: " + String(pitch_ios.input) + "\toutput: " + String(pitch_ios.output) + "\ttarget: " + String(pitch_hinge._target.template translate<unit::degrees>().value));
+            Serial.println("PITCH input: " + String(pitch_ios.input) + "\toutput: " + String(pitch_ios.output) + "\ttarget: " + String(pitch_hinge._target.template translate<unit::degrees>().value) +
+                           "\tp: " + String(pitch_averager.calc().template convert<domain::continuous>().template translate<unit::degrees>().value));
+        }
+
+        /* roll PID info */
+        if (true)
+        {
+            Serial.println("ROLL input: " + String(roll_ios.input) + "\toutput: " + String(roll_ios.output) + "\ttarget: " + String(roll_hinge._target.template translate<unit::degrees>().value) +
+                           "\tr: " + String(roll_averager.calc().template convert<domain::continuous>().template translate<unit::degrees>().value));
         }
 
         /* orientation */
